@@ -1,0 +1,12 @@
+# Terraform local/provider working files — never committed.
+**/.terraform/*
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# .terraform.lock.hcl IS committed (pins provider versions) — do not ignore it.

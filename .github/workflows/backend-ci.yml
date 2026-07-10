@@ -1,0 +1,169 @@
+name: Backend CI/CD
+
+# Per specs/06-cloud-devops.md §7: lint -> typecheck -> unit tests -> build image
+# on every PR; on merge to main, push to ECR, run the Alembic migration as a
+# one-off ECS task (never auto-migrate on app boot in prod, per §2), then
+# deploy the new ECS task definition to staging automatically. Prod is a
+# separate, manual/tag-based promotion requiring one approval (configured via
+# a GitHub Environment named "production" with required reviewers — see
+# infra/README.md; that reviewer gate is repo-settings configuration, not
+# expressible purely in this YAML).
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Environment to promote to prod from (tag-based promotion)"
+        required: true
+        default: "prod"
+
+defaults:
+  run:
+    working-directory: backend
+
+env:
+  AWS_REGION: ap-south-1
+  ECR_REPOSITORY: aavaas-backend
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff
+      - run: ruff check .
+
+  typecheck:
+    name: Type check (mypy)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: mypy .
+
+  test:
+    name: Unit tests (pytest)
+    runs-on: ubuntu-latest
+    needs: typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pytest --maxfail=1 --disable-warnings
+
+  build-image:
+    name: Build Docker image
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - run: docker build -t aavaas-backend:${{ github.sha }} .
+
+  # --- Gate: the four jobs above are required status checks on PRs (configure
+  # branch protection in repo settings to require lint/typecheck/test/build-image). ---
+
+  deploy-staging:
+    name: Deploy to staging (auto, on merge to main)
+    runs-on: ubuntu-latest
+    needs: build-image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN_STAGING }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to ECR
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t "$REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}" .
+          docker push "$REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.sha }}"
+
+      - name: Run Alembic migration (one-off ECS task, before new version receives traffic)
+        run: |
+          aws ecs run-task \
+            --cluster aavaas-staging-cluster \
+            --task-definition aavaas-staging-migrate \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.STAGING_PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.STAGING_TASK_SG_ID }}],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"migrate","command":["alembic","upgrade","head"]}]}'
+
+      - name: Deploy new ECS task definition (api + worker)
+        run: |
+          aws ecs update-service --cluster aavaas-staging-cluster --service aavaas-staging-api --force-new-deployment
+          aws ecs update-service --cluster aavaas-staging-cluster --service aavaas-staging-worker --force-new-deployment
+
+  deploy-prod:
+    name: Deploy to prod (manual/tag-based promotion, requires approval)
+    runs-on: ubuntu-latest
+    needs: build-image
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v')
+    environment: production # GitHub Environment with required reviewers configured in repo settings
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN_PROD }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build, tag, and push image to ECR
+        env:
+          REGISTRY: ${{ steps.ecr-login.outputs.registry }}
+        run: |
+          docker build -t "$REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}" .
+          docker push "$REGISTRY/${{ env.ECR_REPOSITORY }}:${{ github.ref_name }}"
+
+      - name: Run Alembic migration (one-off ECS task, before new version receives traffic)
+        run: |
+          aws ecs run-task \
+            --cluster aavaas-prod-cluster \
+            --task-definition aavaas-prod-migrate \
+            --launch-type FARGATE \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PROD_PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.PROD_TASK_SG_ID }}],assignPublicIp=DISABLED}" \
+            --overrides '{"containerOverrides":[{"name":"migrate","command":["alembic","upgrade","head"]}]}'
+
+      - name: Deploy new ECS task definition (rolling, 100/200 min/max healthy percent)
+        run: |
+          aws ecs update-service --cluster aavaas-prod-cluster --service aavaas-prod-api --force-new-deployment
+          aws ecs update-service --cluster aavaas-prod-cluster --service aavaas-prod-worker --force-new-deployment

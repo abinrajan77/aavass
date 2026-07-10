@@ -1,0 +1,89 @@
+name: Frontend CI
+
+# Per specs/06-cloud-devops.md §7: lint -> typecheck -> unit tests -> build on
+# every PR. On merge to main, Amplify Hosting's own git-triggered deploy takes
+# over (the Amplify app must be connected to this repo/branch once, out of
+# band, in the Amplify console or via a small aws_amplify_app/aws_amplify_branch
+# resource — deliberately left out of this repo's Terraform scope per the
+# infra task's module list, see infra/README.md). This workflow does not
+# attempt to deploy anything itself.
+
+on:
+  pull_request:
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+  push:
+    branches: [main]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend-ci.yml"
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  lint:
+    name: Lint (eslint)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+
+  typecheck:
+    name: Type check (tsc)
+    runs-on: ubuntu-latest
+    needs: lint
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+
+  test:
+    name: Unit tests (vitest/jest)
+    runs-on: ubuntu-latest
+    needs: typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm test -- --run
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build
+
+  # --- Gate: lint/typecheck/test/build are required status checks on PRs
+  # (configure branch protection in repo settings). No deploy job here on
+  # merge to main — Amplify Hosting deploys automatically from its connected
+  # branch per specs/06-cloud-devops.md §6/§7; staging/prod domains
+  # (staging.aavaas.app / app.aavaas.app) map to Amplify branch deployments
+  # configured in the Amplify console, with prod promotion gated the same way
+  # (manual branch/tag promotion + Amplify's own review-app pattern), not by
+  # this workflow. ---
