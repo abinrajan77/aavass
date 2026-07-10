@@ -86,5 +86,53 @@ export const api = {
     apiFetch<T>(path, { ...options, method: "POST", body }),
   put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     apiFetch<T>(path, { ...options, method: "PUT", body }),
+  patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    apiFetch<T>(path, { ...options, method: "PATCH", body }),
   delete: <T>(path: string, options?: RequestOptions) => apiFetch<T>(path, { ...options, method: "DELETE" }),
 };
+
+export interface ResponseWithStatus<T> {
+  status: number;
+  data: T;
+}
+
+/**
+ * Like `apiFetch`, but also surfaces the HTTP status code alongside the
+ * parsed body. Needed for endpoints where the *same* 2xx family carries
+ * different meaning per status — e.g.
+ * `POST /billing-cycles` returns `201` (created synchronously) vs `202`
+ * (accepted, generating asynchronously via SQS) per
+ * specs/03-maintenance-billing/backend.md §4/§6.3. Every other endpoint in
+ * the app can keep using the plain `api.*` helpers above.
+ */
+export async function apiFetchWithStatus<T>(
+  path: string,
+  options: RequestOptions = {}
+): Promise<ResponseWithStatus<T>> {
+  const { body, params, headers, ...rest } = options;
+
+  const res = await fetch(buildUrl(path, params), {
+    ...rest,
+    credentials: "include",
+    headers: {
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      Accept: "application/json",
+      ...headers,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const isJson = res.headers.get("content-type")?.includes("application/json");
+  const payload = isJson ? await res.json().catch(() => null) : null;
+
+  if (!res.ok) {
+    const problem: ProblemDetails = payload ?? {
+      error_code: "UNKNOWN_ERROR",
+      message: res.statusText || "Request failed",
+      field_errors: null,
+    };
+    throw new ApiError(res.status, problem);
+  }
+
+  return { status: res.status, data: payload as T };
+}
