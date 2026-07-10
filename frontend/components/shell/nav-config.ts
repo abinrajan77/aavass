@@ -1,5 +1,5 @@
 import { PERMISSIONS } from "@/lib/permissions";
-import { Building2, Home, Settings, ShieldCheck, Users } from "lucide-react";
+import { Building2, Calculator, CalendarClock, Home, Receipt, Settings, ShieldCheck, Users } from "lucide-react";
 
 export interface NavItem {
   label: string;
@@ -36,6 +36,29 @@ export const TOWER_NAV_ITEMS: NavItem[] = [
     href: (towerId) => `/towers/${towerId}/settings/roles`,
     icon: ShieldCheck,
     permission: PERMISSIONS.MANAGE_ASSOCIATION_MEMBERS,
+  },
+  // Module 3 — Maintenance Billing (specs/03-maintenance-billing/frontend.md §1).
+  // View access is VIEW_TOWER_DATA for all three; write actions (editing the
+  // formula/grace period, generating a cycle, marking paid) are gated
+  // per-screen via <Can> on CONFIGURE_BILLING / CREATE_BILLING_CYCLE /
+  // RECORD_PAYMENT respectively — never hidden from view-only roles.
+  {
+    label: "Billing Formula",
+    href: (towerId) => `/towers/${towerId}/billing/formula`,
+    icon: Calculator,
+    permission: PERMISSIONS.VIEW_TOWER_DATA,
+  },
+  {
+    label: "Billing Cycles",
+    href: (towerId) => `/towers/${towerId}/billing/cycles`,
+    icon: CalendarClock,
+    permission: PERMISSIONS.VIEW_TOWER_DATA,
+  },
+  {
+    label: "Dues",
+    href: (towerId) => `/towers/${towerId}/billing/dues`,
+    icon: Receipt,
+    permission: PERMISSIONS.VIEW_TOWER_DATA,
   },
 ];
 
