@@ -1,5 +1,15 @@
 import { PERMISSIONS } from "@/lib/permissions";
-import { Building2, Calculator, CalendarClock, Home, Receipt, Settings, ShieldCheck, Users } from "lucide-react";
+import {
+  Building2,
+  Calculator,
+  CalendarClock,
+  Home,
+  KeyRound,
+  Receipt,
+  Settings,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 
 export interface NavItem {
   label: string;
@@ -17,6 +27,16 @@ export const TOWER_NAV_ITEMS: NavItem[] = [
     icon: Home,
     // Every tower member has at least VIEW_TOWER_DATA (association members
     // and flat owners alike) — see specs/00-architecture-and-standards.md §5.2.
+    permission: PERMISSIONS.VIEW_TOWER_DATA,
+  },
+  {
+    label: "Flats",
+    href: (towerId) => `/towers/${towerId}/flats`,
+    icon: KeyRound,
+    // specs/02-flat-owner-tenant/frontend.md routes table: "Admin
+    // (MANAGE_RESIDENTS or VIEW_TOWER_DATA)" — VIEW_TOWER_DATA is the
+    // broader of the two so a read-only tower member (e.g. a custom role
+    // with only VIEW_TOWER_DATA) still sees the nav item.
     permission: PERMISSIONS.VIEW_TOWER_DATA,
   },
   {

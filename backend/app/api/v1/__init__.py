@@ -6,11 +6,14 @@ from app.api.v1 import (
     auth,
     billing_cycles,
     complexes,
+    flats,
     grace_period,
     health,
     jobs,
     maintenance_dues,
     maintenance_formula,
+    me_flats,
+    owners,
     roles,
     towers,
 )
@@ -24,6 +27,9 @@ api_v1_router.include_router(roles.router)
 api_v1_router.include_router(association_members.router)
 api_v1_router.include_router(audit_log.router)
 api_v1_router.include_router(jobs.router)
+api_v1_router.include_router(flats.router)
+api_v1_router.include_router(owners.router)
+api_v1_router.include_router(me_flats.router)
 api_v1_router.include_router(maintenance_formula.router)
 api_v1_router.include_router(grace_period.router)
 api_v1_router.include_router(billing_cycles.router)

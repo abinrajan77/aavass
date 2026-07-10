@@ -75,6 +75,92 @@ export interface CreateAssociationMemberResponse {
   temporary_password: string;
 }
 
+/**
+ * Module 2 (specs/02-flat-owner-tenant) shapes — mirrored 1:1 from
+ * backend.md's Pydantic schemas/SQLAlchemy tables. The backend is being
+ * built concurrently to the same spec by another agent.
+ */
+export type FlatType = "1BHK" | "2BHK" | "3BHK" | "OTHER";
+export type OccupancyStatus = "owner_occupied" | "tenant_occupied" | "vacant";
+/** Enum accepted by TenantVacate.occupancy_status — never "tenant_occupied" (backend.md). */
+export type VacateOccupancyStatus = Extract<OccupancyStatus, "owner_occupied" | "vacant">;
+
+export interface OwnerSummary {
+  id: string;
+  full_name: string;
+  phone: string;
+  email: string | null;
+}
+
+export interface TenantSummary {
+  id: string;
+  full_name: string;
+  phone: string;
+  email: string | null;
+}
+
+export interface Flat {
+  id: string;
+  tower_id: string;
+  flat_number: string;
+  floor: number;
+  type: FlatType;
+  carpet_area_sqft: number;
+  occupancy_status: OccupancyStatus;
+  primary_owner: OwnerSummary | null;
+  active_tenant: TenantSummary | null;
+  deactivated_at: string | null;
+}
+
+export interface Owner {
+  id: string;
+  /** FK to users.id — nullable until the owner registers a login. Used on
+   * the frontend only to match "which co-owner is the logged-in user" on
+   * /my-flats/[flatId] (backend.md doesn't spell this out explicitly, but
+   * it's a real column on the Owner table). */
+  user_id: string | null;
+  full_name: string;
+  phone: string;
+  email: string | null;
+  id_number: string | null;
+  created_at: string;
+  deactivated_at: string | null;
+}
+
+/**
+ * Response shape for GET/POST/PATCH .../flats/{flat_id}/owners. backend.md's
+ * routes table doesn't spell out a dedicated "FlatOwnershipOut" schema, but
+ * frontend.md requires the Owners tab to show name/phone/email per row, so
+ * this assumes the nested `owner` is joined in the response — flag to the
+ * backend agent if it's returned as separate owner_id-only rows instead.
+ */
+export interface FlatOwnership {
+  id: string;
+  flat_id: string;
+  owner_id: string;
+  /** Full Owner (not just OwnerSummary) so /my-flats/[flatId] can match
+   * `owner.user_id === session.user.id` to find "my own" contact record. */
+  owner: Owner;
+  is_primary_contact: boolean;
+  date_from: string;
+  date_to: string | null;
+  created_at: string;
+}
+
+export interface Tenant {
+  id: string;
+  flat_id: string;
+  full_name: string;
+  phone: string;
+  email: string | null;
+  id_number: string | null;
+  lease_start: string;
+  lease_end: string | null;
+  is_active: boolean;
+  vacated_at: string | null;
+  created_at: string;
+}
+
 /** RFC7807-style error envelope — specs/00-architecture-and-standards.md §6. */
 export interface ProblemDetails {
   error_code: string;

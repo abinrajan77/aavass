@@ -16,7 +16,7 @@ from tests.factories import (
     make_complex,
     make_flat,
     make_maintenance_formula,
-    make_owner,
+    make_primary_owner_for_flat,
     make_tenant,
     make_tower,
 )
@@ -39,7 +39,9 @@ async def _setup_paid_ready_due(db_session, *, assigned_to_type="owner"):
         tower_id=tower.id,
         occupancy_status="tenant_occupied" if assigned_to_type == "tenant" else "owner_occupied",
     )
-    owner = await make_owner(db_session, flat_id=flat.id, full_name="Asha Rao")
+    owner = await make_primary_owner_for_flat(
+        db_session, flat_id=flat.id, created_by_user_id=member.user_id, full_name="Asha Rao"
+    )
     tenant = None
     if assigned_to_type == "tenant":
         tenant = await make_tenant(db_session, flat_id=flat.id, full_name="Ravi Kumar")
@@ -53,7 +55,7 @@ async def _setup_paid_ready_due(db_session, *, assigned_to_type="owner"):
         tower_id=tower.id,
         flat_id=flat.id,
         amount=2000,
-        carpet_area_snapshot=flat.carpet_area,
+        carpet_area_snapshot=flat.carpet_area_sqft,
         assigned_to_type=assigned_to_type,
         assigned_to_id=tenant.id if tenant is not None else owner.id,
         assigned_to_name_snapshot=tenant.full_name if tenant is not None else owner.full_name,

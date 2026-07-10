@@ -13,6 +13,7 @@ from app.models.apartment_complex import ApartmentComplex
 from app.models.association_member import AssociationMember
 from app.models.billing_cycle import BillingCycle
 from app.models.flat import Flat
+from app.models.flat_ownership import FlatOwnership
 from app.models.grace_period_config import GracePeriodConfig
 from app.models.maintenance_formula import MaintenanceFormula
 from app.models.owner import Owner
@@ -106,25 +107,23 @@ async def make_association_member(
     return member
 
 
-# --- Module 3 (Maintenance Billing) factories — also cover the Module 2 stub models these
-# depend on (`app.models.flat/owner/tenant`, see those files' docstrings). ---
-
-
 async def make_flat(
     db: AsyncSession,
     *,
     tower_id: UUID,
     flat_number: str = "101",
-    carpet_area: Decimal = Decimal("850.00"),
-    occupancy_status: str = "owner_occupied",
-    is_active: bool = True,
+    floor: int = 1,
+    type: str = "2BHK",
+    carpet_area_sqft: Decimal = Decimal("850.00"),
+    occupancy_status: str = "vacant",
 ) -> Flat:
     flat = Flat(
         tower_id=tower_id,
         flat_number=flat_number,
-        carpet_area=carpet_area,
+        floor=floor,
+        type=type,
+        carpet_area_sqft=carpet_area_sqft,
         occupancy_status=occupancy_status,
-        is_active=is_active,
     )
     db.add(flat)
     await db.flush()
@@ -134,13 +133,63 @@ async def make_flat(
 async def make_owner(
     db: AsyncSession,
     *,
-    flat_id: UUID,
-    full_name: str = "Asha Rao",
-    is_primary_contact: bool = True,
+    full_name: str = "Jane Owner",
+    phone: str = "9876500000",
+    email: str | None = None,
+    id_number: str | None = None,
+    user_id: UUID | None = None,
 ) -> Owner:
-    owner = Owner(flat_id=flat_id, full_name=full_name, is_primary_contact=is_primary_contact)
+    owner = Owner(
+        full_name=full_name, phone=phone, email=email, id_number=id_number, user_id=user_id
+    )
     db.add(owner)
     await db.flush()
+    return owner
+
+
+async def make_flat_ownership(
+    db: AsyncSession,
+    *,
+    flat_id: UUID,
+    owner_id: UUID,
+    created_by_user_id: UUID,
+    is_primary_contact: bool = True,
+    date_from: date = date(2024, 1, 1),
+    date_to: date | None = None,
+) -> FlatOwnership:
+    ownership = FlatOwnership(
+        flat_id=flat_id,
+        owner_id=owner_id,
+        is_primary_contact=is_primary_contact,
+        date_from=date_from,
+        date_to=date_to,
+        created_by_user_id=created_by_user_id,
+    )
+    db.add(ownership)
+    await db.flush()
+    return ownership
+
+
+async def make_primary_owner_for_flat(
+    db: AsyncSession,
+    *,
+    flat_id: UUID,
+    created_by_user_id: UUID,
+    full_name: str = "Asha Rao",
+    phone: str = "9876500000",
+) -> Owner:
+    """Module 3 test convenience: an `Owner` is no longer flat-scoped (see `app/models/owner.py`
+    — ownership lives on `FlatOwnership`), so Module 3's billing tests (which only care about
+    "this flat's primary owner", not co-ownership/history) go through this one-call helper
+    instead of each test wiring up `make_owner` + `make_flat_ownership` separately."""
+    owner = await make_owner(db, full_name=full_name, phone=phone)
+    await make_flat_ownership(
+        db,
+        flat_id=flat_id,
+        owner_id=owner.id,
+        created_by_user_id=created_by_user_id,
+        is_primary_contact=True,
+    )
     return owner
 
 
@@ -148,10 +197,20 @@ async def make_tenant(
     db: AsyncSession,
     *,
     flat_id: UUID,
-    full_name: str = "Ravi Kumar",
+    full_name: str = "Tom Tenant",
+    phone: str = "9123456780",
+    lease_start: date = date(2024, 1, 1),
+    lease_end: date | None = None,
     is_active: bool = True,
 ) -> Tenant:
-    tenant = Tenant(flat_id=flat_id, full_name=full_name, is_active=is_active)
+    tenant = Tenant(
+        flat_id=flat_id,
+        full_name=full_name,
+        phone=phone,
+        lease_start=lease_start,
+        lease_end=lease_end,
+        is_active=is_active,
+    )
     db.add(tenant)
     await db.flush()
     return tenant

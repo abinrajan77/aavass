@@ -1,12 +1,11 @@
-"""Module 2 read-service stand-in.
-
-`specs/02-flat-owner-tenant` has not landed in this codebase yet (see `app/models/flat.py`'s
-stub docstring). Module 3's backend.md says this module "reads Flat/Owner/Tenant from Module 2
-via its service layer" — since that service layer doesn't exist for real, this module reads the
-stub models directly here, exposing exactly the read surface Module 3 needs
-(`count_active`, `get_flat_read_model`). When Module 2 ships its own `flats_service.py` /
-`GET /api/v1/towers/{tower_id}/flats`, this module's imports should be repointed there instead
-of deleting the read functions Module 3 depends on.
+"""Module 3's read surface onto Module 2's Flat/Owner/Tenant/FlatOwnership models
+(`count_active`, `list_active_flat_ids`, `get_flat_read_model`) — kept as a thin translation
+layer so `app.services.billing_cycle` depends only on the `FlatRead`/`OwnerRead`/`TenantRead`
+dataclasses below, never on Module 2's ORM models directly. Module 2 owns `Flat`/`Owner`/
+`Tenant`/`FlatOwnership` for real (`specs/02-flat-owner-tenant`); "active" here means
+`deactivated_at IS NULL` (soft-delete, not a boolean flag), and "primary owner" is read via
+`FlatOwnership` (`date_to IS NULL AND is_primary_contact`) since `Owner` is not itself
+flat-scoped — an owner can hold multiple flats across towers (PRD §6.2.2).
 """
 
 from dataclasses import dataclass
@@ -17,6 +16,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.flat import Flat
+from app.models.flat_ownership import FlatOwnership
 from app.models.owner import Owner
 from app.models.tenant import Tenant
 
@@ -49,7 +49,7 @@ async def count_active(db: AsyncSession, tower_id: UUID) -> int:
     total = await db.scalar(
         select(func.count())
         .select_from(Flat)
-        .where(Flat.tower_id == tower_id, Flat.is_active.is_(True))
+        .where(Flat.tower_id == tower_id, Flat.deactivated_at.is_(None))
     )
     return total or 0
 
@@ -58,7 +58,9 @@ async def list_active_flat_ids(db: AsyncSession, tower_id: UUID) -> list[UUID]:
     rows = (
         (
             await db.execute(
-                select(Flat.id).where(Flat.tower_id == tower_id, Flat.is_active.is_(True))
+                select(Flat.id).where(
+                    Flat.tower_id == tower_id, Flat.deactivated_at.is_(None)
+                )
             )
         )
         .scalars()
@@ -86,7 +88,14 @@ async def get_flat_read_model(db: AsyncSession, flat_id: UUID) -> FlatRead | Non
             current_tenant = TenantRead(id=tenant.id, full_name=tenant.full_name)
 
     primary_owner_row = await db.scalar(
-        select(Owner).where(Owner.flat_id == flat.id, Owner.is_primary_contact.is_(True)).limit(1)
+        select(Owner)
+        .join(FlatOwnership, FlatOwnership.owner_id == Owner.id)
+        .where(
+            FlatOwnership.flat_id == flat.id,
+            FlatOwnership.date_to.is_(None),
+            FlatOwnership.is_primary_contact.is_(True),
+        )
+        .limit(1)
     )
     primary_owner = (
         OwnerRead(id=primary_owner_row.id, full_name=primary_owner_row.full_name)
@@ -97,7 +106,7 @@ async def get_flat_read_model(db: AsyncSession, flat_id: UUID) -> FlatRead | Non
     return FlatRead(
         id=flat.id,
         flat_number=flat.flat_number,
-        carpet_area=flat.carpet_area,
+        carpet_area=flat.carpet_area_sqft,
         occupancy_status=flat.occupancy_status,
         current_tenant=current_tenant,
         primary_owner=primary_owner,

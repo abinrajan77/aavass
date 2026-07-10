@@ -17,7 +17,7 @@ from tests.factories import (
     make_complex,
     make_flat,
     make_maintenance_formula,
-    make_owner,
+    make_primary_owner_for_flat,
     make_tower,
 )
 
@@ -31,7 +31,9 @@ async def _make_pending_due(db_session, *, tower, formula, grace_period_days, du
         db_session, tower_id=tower.id, email=f"creator-{uuid.uuid4().hex[:8]}@example.com"
     )
     flat = await make_flat(db_session, tower_id=tower.id)
-    owner = await make_owner(db_session, flat_id=flat.id)
+    owner = await make_primary_owner_for_flat(
+        db_session, flat_id=flat.id, created_by_user_id=member.user_id
+    )
     cycle = await make_billing_cycle(
         db_session,
         tower_id=tower.id,
@@ -47,7 +49,7 @@ async def _make_pending_due(db_session, *, tower, formula, grace_period_days, du
         tower_id=tower.id,
         flat_id=flat.id,
         amount=2000,
-        carpet_area_snapshot=flat.carpet_area,
+        carpet_area_snapshot=flat.carpet_area_sqft,
         assigned_to_type="owner",
         assigned_to_id=owner.id,
         assigned_to_name_snapshot=owner.full_name,

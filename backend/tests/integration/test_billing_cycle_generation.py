@@ -25,7 +25,7 @@ from tests.factories import (
     make_complex,
     make_flat,
     make_maintenance_formula,
-    make_owner,
+    make_primary_owner_for_flat,
     make_tenant,
     make_tower,
 )
@@ -58,25 +58,41 @@ async def test_sync_generation_creates_one_due_per_active_flat_with_correct_assi
         db_session,
         tower_id=tower.id,
         flat_number="101",
-        carpet_area=850,
+        carpet_area_sqft=850,
         occupancy_status="owner_occupied",
     )
-    await make_owner(db_session, flat_id=owner_occupied.id, full_name="Asha Rao")
+    await make_primary_owner_for_flat(
+        db_session,
+        flat_id=owner_occupied.id,
+        created_by_user_id=member.user_id,
+        full_name="Asha Rao",
+    )
 
     tenant_occupied = await make_flat(
         db_session,
         tower_id=tower.id,
         flat_number="102",
-        carpet_area=900,
+        carpet_area_sqft=900,
         occupancy_status="tenant_occupied",
     )
-    await make_owner(db_session, flat_id=tenant_occupied.id, full_name="Owner Two")
+    await make_primary_owner_for_flat(
+        db_session,
+        flat_id=tenant_occupied.id,
+        created_by_user_id=member.user_id,
+        full_name="Owner Two",
+    )
     await make_tenant(db_session, flat_id=tenant_occupied.id, full_name="Ravi Kumar")
 
     vacant = await make_flat(
-        db_session, tower_id=tower.id, flat_number="103", carpet_area=800, occupancy_status="vacant"
+        db_session,
+        tower_id=tower.id,
+        flat_number="103",
+        carpet_area_sqft=800,
+        occupancy_status="vacant",
     )
-    await make_owner(db_session, flat_id=vacant.id, full_name="Owner Three")
+    await make_primary_owner_for_flat(
+        db_session, flat_id=vacant.id, created_by_user_id=member.user_id, full_name="Owner Three"
+    )
 
     await db_session.commit()
     await _login(client, "billing-admin@example.com")
@@ -115,7 +131,9 @@ async def test_flat_with_no_primary_owner_is_skipped_without_aborting_the_cycle(
     tower, member = await _setup_tower(db_session)
 
     good_flat = await make_flat(db_session, tower_id=tower.id, flat_number="101")
-    await make_owner(db_session, flat_id=good_flat.id, full_name="Asha Rao")
+    await make_primary_owner_for_flat(
+        db_session, flat_id=good_flat.id, created_by_user_id=member.user_id, full_name="Asha Rao"
+    )
 
     bad_flat = await make_flat(db_session, tower_id=tower.id, flat_number="102")
     # No owner at all -> NO_PRIMARY_OWNER.
@@ -139,7 +157,9 @@ async def test_flat_with_no_primary_owner_is_skipped_without_aborting_the_cycle(
 async def test_duplicate_cycle_generation_returns_409(client, db_session):
     tower, member = await _setup_tower(db_session)
     flat = await make_flat(db_session, tower_id=tower.id)
-    await make_owner(db_session, flat_id=flat.id)
+    await make_primary_owner_for_flat(
+        db_session, flat_id=flat.id, created_by_user_id=member.user_id
+    )
     await db_session.commit()
     await _login(client, "billing-admin@example.com")
 
@@ -163,7 +183,9 @@ async def test_duplicate_cycle_generation_returns_409(client, db_session):
 async def test_put_on_cycle_with_dues_returns_409_immutable_record(client, db_session):
     tower, member = await _setup_tower(db_session)
     flat = await make_flat(db_session, tower_id=tower.id)
-    await make_owner(db_session, flat_id=flat.id)
+    await make_primary_owner_for_flat(
+        db_session, flat_id=flat.id, created_by_user_id=member.user_id
+    )
     await db_session.commit()
     await _login(client, "billing-admin@example.com")
 
@@ -215,7 +237,9 @@ async def test_async_generation_returns_202_and_worker_completes_the_job(
     tower, member = await _setup_tower(db_session)
     for i in range(3):
         flat = await make_flat(db_session, tower_id=tower.id, flat_number=str(200 + i))
-        await make_owner(db_session, flat_id=flat.id, full_name=f"Owner {i}")
+        await make_primary_owner_for_flat(
+            db_session, flat_id=flat.id, created_by_user_id=member.user_id, full_name=f"Owner {i}"
+        )
     await db_session.commit()
     await _login(client, "billing-admin@example.com")
 
@@ -255,7 +279,9 @@ async def test_retried_job_delivery_for_an_already_active_cycle_is_a_safe_noop(
 
     tower, member = await _setup_tower(db_session)
     flat = await make_flat(db_session, tower_id=tower.id)
-    await make_owner(db_session, flat_id=flat.id)
+    await make_primary_owner_for_flat(
+        db_session, flat_id=flat.id, created_by_user_id=member.user_id
+    )
     await db_session.commit()
     await _login(client, "billing-admin@example.com")
 

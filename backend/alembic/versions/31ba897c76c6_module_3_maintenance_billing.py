@@ -1,15 +1,18 @@
 """module 3 maintenance billing
 
 Revision ID: 31ba897c76c6
-Revises: 85b94fc0f4bc
+Revises: 5fc2b3fcd07b
 Create Date: 2026-07-10 15:00:00.000000
 
 Adds:
-- Module 2 stub tables (`flats`, `owners`, `tenants`) — see `app/models/flat.py`'s docstring;
-  minimal columns only, for Module 3's FK/read needs, until Module 2 lands for real.
 - The shared generic `jobs` table (`06-cloud-devops.md` §4).
 - Module 3's own tables: `maintenance_formulas`, `grace_period_configs`, `billing_cycles`,
   `maintenance_dues`, `payments`, `receipts`, `receipt_counters` (backend.md §1).
+
+`flats`/`owners`/`tenants` (referenced here via FK) are created by Module 2's migration
+(`5fc2b3fcd07b`), now chained as this migration's parent — this migration originally shipped
+its own stub versions of those three tables (see git history), since Module 2 hadn't landed
+yet; that stub was removed once Module 2's real tables superseded it.
 """
 
 from collections.abc import Sequence
@@ -21,66 +24,12 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "31ba897c76c6"
-down_revision: str | None = "85b94fc0f4bc"
+down_revision: str | None = "5fc2b3fcd07b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    # --- Module 2 stubs ---
-    op.create_table(
-        "flats",
-        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("tower_id", sa.Uuid(), nullable=False),
-        sa.Column("flat_number", sa.String(length=20), nullable=False),
-        sa.Column("carpet_area", sa.Numeric(precision=10, scale=2), nullable=False),
-        sa.Column("occupancy_status", sa.String(length=20), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(["tower_id"], ["towers.id"]),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(op.f("ix_flats_tower_id"), "flats", ["tower_id"], unique=False)
-
-    op.create_table(
-        "owners",
-        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("flat_id", sa.Uuid(), nullable=False),
-        sa.Column("full_name", sa.String(length=200), nullable=False),
-        sa.Column("is_primary_contact", sa.Boolean(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(["flat_id"], ["flats.id"]),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(op.f("ix_owners_flat_id"), "owners", ["flat_id"], unique=False)
-
-    op.create_table(
-        "tenants",
-        sa.Column("id", sa.Uuid(), server_default=sa.text("gen_random_uuid()"), nullable=False),
-        sa.Column("flat_id", sa.Uuid(), nullable=False),
-        sa.Column("full_name", sa.String(length=200), nullable=False),
-        sa.Column("is_active", sa.Boolean(), nullable=False),
-        sa.Column(
-            "created_at",
-            sa.TIMESTAMP(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-        sa.ForeignKeyConstraint(["flat_id"], ["flats.id"]),
-        sa.PrimaryKeyConstraint("id"),
-    )
-    op.create_index(op.f("ix_tenants_flat_id"), "tenants", ["flat_id"], unique=False)
-
     # --- Shared generic jobs table (06-cloud-devops.md §4) ---
     op.create_table(
         "jobs",
@@ -319,9 +268,3 @@ def downgrade() -> None:
     op.drop_table("maintenance_formulas")
     op.drop_index(op.f("ix_jobs_tower_id"), table_name="jobs")
     op.drop_table("jobs")
-    op.drop_index(op.f("ix_tenants_flat_id"), table_name="tenants")
-    op.drop_table("tenants")
-    op.drop_index(op.f("ix_owners_flat_id"), table_name="owners")
-    op.drop_table("owners")
-    op.drop_index(op.f("ix_flats_tower_id"), table_name="flats")
-    op.drop_table("flats")

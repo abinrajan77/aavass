@@ -14,9 +14,9 @@ from app.models.association_member import AssociationMember  # noqa: E402, F401
 from app.models.audit_log import AuditLog  # noqa: E402, F401
 from app.models.billing_cycle import BillingCycle  # noqa: E402, F401
 
-# Module 2 stubs (see app/models/flat.py's docstring) — Module 3 depends on these for FK
-# integrity; real Module 2 build-out should replace these three, not extend them.
+# Module 2 — Flat, Owner & Tenant Management.
 from app.models.flat import Flat  # noqa: E402, F401
+from app.models.flat_ownership import FlatOwnership  # noqa: E402, F401
 from app.models.grace_period_config import GracePeriodConfig  # noqa: E402, F401
 
 # Module 3 — Maintenance Billing.

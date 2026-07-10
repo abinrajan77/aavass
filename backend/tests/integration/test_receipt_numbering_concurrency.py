@@ -26,7 +26,7 @@ from tests.factories import (
     make_complex,
     make_flat,
     make_maintenance_formula,
-    make_owner,
+    make_primary_owner_for_flat,
     make_role,
     make_tower,
     make_user,
@@ -55,13 +55,15 @@ async def test_receipt_numbers_have_no_gaps_or_collisions_under_concurrent_mark_
         )
         for i in range(CONCURRENCY):
             flat = await make_flat(setup_db, tower_id=tower.id, flat_number=str(i))
-            owner = await make_owner(setup_db, flat_id=flat.id, full_name=f"Owner {i}")
+            owner = await make_primary_owner_for_flat(
+                setup_db, flat_id=flat.id, created_by_user_id=user.id, full_name=f"Owner {i}"
+            )
             due = MaintenanceDue(
                 billing_cycle_id=cycle.id,
                 tower_id=tower.id,
                 flat_id=flat.id,
                 amount=2000,
-                carpet_area_snapshot=flat.carpet_area,
+                carpet_area_snapshot=flat.carpet_area_sqft,
                 assigned_to_type="owner",
                 assigned_to_id=owner.id,
                 assigned_to_name_snapshot=owner.full_name,

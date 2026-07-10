@@ -15,7 +15,7 @@ from tests.factories import (
     make_complex,
     make_flat,
     make_maintenance_formula,
-    make_owner,
+    make_primary_owner_for_flat,
     make_tower,
 )
 
@@ -34,8 +34,10 @@ async def test_changing_the_formula_does_not_retroact_onto_a_generated_cycle(cli
     await make_maintenance_formula(
         db_session, tower_id=tower.id, created_by=member.id, base_amount=2000, per_sqft_rate=2
     )
-    flat = await make_flat(db_session, tower_id=tower.id, carpet_area=850)
-    await make_owner(db_session, flat_id=flat.id)
+    flat = await make_flat(db_session, tower_id=tower.id, carpet_area_sqft=850)
+    await make_primary_owner_for_flat(
+        db_session, flat_id=flat.id, created_by_user_id=member.user_id
+    )
     await db_session.commit()
 
     await _login(client, "versioning-admin@example.com")
@@ -82,7 +84,9 @@ async def test_changing_grace_period_does_not_retroact_onto_a_generated_cycles_s
     )
     await make_maintenance_formula(db_session, tower_id=tower.id, created_by=member.id)
     flat = await make_flat(db_session, tower_id=tower.id)
-    await make_owner(db_session, flat_id=flat.id)
+    await make_primary_owner_for_flat(
+        db_session, flat_id=flat.id, created_by_user_id=member.user_id
+    )
     await db_session.commit()
 
     await _login(client, "grace-versioning-admin@example.com")
