@@ -5,8 +5,10 @@ from app.api.v1 import (
     audit_log,
     auth,
     complexes,
+    expenditures,
     health,
     roles,
+    special_collections,
     towers,
 )
 
@@ -18,3 +20,5 @@ api_v1_router.include_router(towers.router)
 api_v1_router.include_router(roles.router)
 api_v1_router.include_router(association_members.router)
 api_v1_router.include_router(audit_log.router)
+api_v1_router.include_router(special_collections.router)
+api_v1_router.include_router(expenditures.router)

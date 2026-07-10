@@ -121,3 +121,23 @@
     @apply bg-background text-foreground;
   }
 }
+
+/*
+ * Hand-rolled magicui ShineBorder animation (see
+ * components/magicui/shine-border.tsx) — magicui isn't vendored as an npm
+ * dependency in this repo, so this module reimplements the one accent it
+ * needs (specs/00-architecture-and-standards.md §3.2 "ShineBorder — highlight
+ * the 'action needed' card"), used once on the "Open Special Collections"
+ * summary card.
+ */
+@keyframes shine {
+  0% {
+    background-position: 0% 0%;
+  }
+  50% {
+    background-position: 100% 100%;
+  }
+  100% {
+    background-position: 0% 0%;
+  }
+}

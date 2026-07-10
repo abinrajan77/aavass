@@ -43,7 +43,7 @@ infra/
     ecs-service/   generic Fargate service (used for both the API and the worker)
     alb/           ALB + HTTPS listener + API target group
     s3/            aavaas-{env}-files bucket
-    sqs/           billing-cycle-jobs / report-export-jobs queues (+ DLQs)
+    sqs/           billing-cycle-jobs / report-export-jobs / special-collection-jobs queues (+ DLQs)
     cloudwatch/    log groups + alarms
     waf/           WAFv2 web ACL (rate limit + AWS managed rule sets) on the ALB
   environments/
@@ -106,11 +106,18 @@ seeding needed for those.
 
 ## Shared infra that later modules will consume, not built here
 
-- **SQS queues** (`billing-cycle-jobs`, `report-export-jobs`) are provisioned now per
-  `06-cloud-devops.md` §4, but **Module 1 (Auth/RBAC/Tower setup) does not consume
-  them** — they sit idle until Module 3 (Maintenance Billing) and Module 4 (Special
-  Collections/Expenditure) land, at which point their backends can start
-  sending/receiving without any infra change.
+- **SQS queues** (`billing-cycle-jobs`, `report-export-jobs`, `special-collection-jobs`)
+  are provisioned now per `06-cloud-devops.md` §4 and
+  `specs/04-special-collections-expenditure/cloud.md` ("SQS / async jobs"), but
+  **no backend consumes any of them yet** — they sit idle until Module 3
+  (Maintenance Billing), Module 4 (Special Collections/Expenditure), and Module 5
+  (Reporting) land their respective worker application code, at which point each
+  can start sending/receiving without any infra change. `special-collection-jobs`
+  specifically backs Module 4's async due-generation path for special
+  collections on towers with >300 active flats (same sync/async threshold logic
+  as billing cycles) — that async path is explicitly deferred by Module 4's
+  backend this round (it depends on Module 3), so this queue is provisioned but
+  has no producer/consumer yet, same idle status as the other two.
 - **Frontend CloudWatch log group** (`/aavaas/{env}/frontend`) is created as a
   placeholder/aggregation target only — Amplify Hosting manages its own build/SSR
   logs natively; this group only becomes useful if custom log forwarding from
@@ -123,6 +130,15 @@ seeding needed for those.
   here.
 - **ECS+CloudFront frontend path** (the alternative to Amplify from §6) is captured
   only as a commented-out example in `modules/ecs-service/main.tf`.
+- **Module 4's S3 prefixes** (`expenditure-attachments/{tower_id}/{expenditure_id}/{filename}`
+  and the reused `receipts/{tower_id}/{receipt_id}.pdf` prefix, per
+  `specs/04-special-collections-expenditure/cloud.md` §S3) require **zero**
+  changes to the `s3` module — same `aavaas-{env}-files` bucket, same
+  encryption/versioning/lifecycle rules, no per-prefix Terraform resources.
+  There's no existing per-module/per-prefix bucket-policy or scoped-IAM pattern
+  in this codebase to extend; bucket access is granted per ECS service (api,
+  worker), not per prefix — see the comment block at the top of
+  `modules/s3/main.tf` for the full rationale.
 
 ## CI/CD
 

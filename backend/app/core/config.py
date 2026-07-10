@@ -32,6 +32,12 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: str = Field(default="http://localhost:3000", alias="CORS_ORIGINS")
 
+    # --- S3 (file storage, per ../06-cloud-devops.md §5) ---
+    s3_bucket_name: str = Field(default="aavaas-local-files", alias="S3_BUCKET_NAME")
+    aws_region: str = Field(default="ap-south-1", alias="AWS_REGION")
+    # Only set in local/test envs (moto, localstack) to redirect boto3 away from real AWS.
+    s3_endpoint_url: str | None = Field(default=None, alias="S3_ENDPOINT_URL")
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

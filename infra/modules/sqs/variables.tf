@@ -15,7 +15,7 @@ variable "max_receive_count" {
 }
 
 variable "visibility_timeout_seconds" {
-  description = "Should exceed the worker's expected max processing time for a billing-cycle/report-export job."
+  description = "Should exceed the worker's expected max processing time for a billing-cycle/report-export/special-collection job."
   type        = number
   default     = 300
 }

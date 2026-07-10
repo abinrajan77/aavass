@@ -151,7 +151,7 @@ module "cloudwatch" {
   ecs_cluster_name        = aws_ecs_cluster.this.name
   ecs_services            = ["aavaas-${var.env}-api", "aavaas-${var.env}-worker"]
   rds_instance_id         = module.rds.db_instance_id
-  sqs_queue_names         = { billing_cycle = "aavaas-${var.env}-billing-cycle-jobs", report_export = "aavaas-${var.env}-report-export-jobs" }
+  sqs_queue_names         = { billing_cycle = "aavaas-${var.env}-billing-cycle-jobs", report_export = "aavaas-${var.env}-report-export-jobs", special_collection = "aavaas-${var.env}-special-collection-jobs" }
   tags                    = local.tags
 }
 

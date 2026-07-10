@@ -45,7 +45,7 @@ resource "aws_secretsmanager_secret_version" "s3_bucket_name" {
 
 resource "aws_secretsmanager_secret" "sqs_queue_urls" {
   name        = "aavaas/${var.env}/sqs-queue-urls"
-  description = "JSON map of job_type -> SQS queue URL (billing_cycle, report_export), referenced by ECS task definitions."
+  description = "JSON map of job_type -> SQS queue URL (billing_cycle, report_export, special_collection), referenced by ECS task definitions."
 
   tags = merge(local.common_tags, {
     Name = "aavaas-${var.env}-sqs-queue-urls"
