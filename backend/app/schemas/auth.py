@@ -12,6 +12,7 @@ class UserOut(BaseModel):
     id: UUID
     email: str
     account_type: str
+    is_superuser: bool
 
     model_config = {"from_attributes": True}
 
