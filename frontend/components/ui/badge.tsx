@@ -20,6 +20,12 @@ const badgeVariants = cva(
           "border-transparent bg-warning text-warning-foreground shadow hover:bg-warning/80",
         outline: "text-foreground",
         mutedOutline: "border-border text-muted-foreground bg-transparent",
+        // Added for the occupancy-status badge (specs/02-flat-owner-tenant/
+        // frontend.md) — deliberately distinct tokens from
+        // success/warning/destructive, which are reserved for payment status.
+        accent:
+          "border-transparent bg-accent text-accent-foreground shadow hover:bg-accent/80",
+        secondaryOutline: "border-secondary-foreground/30 text-secondary-foreground bg-transparent",
       },
     },
     defaultVariants: {

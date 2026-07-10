@@ -52,7 +52,7 @@ jobs:
       - run: npx tsc --noEmit
 
   test:
-    name: Unit tests (vitest/jest)
+    name: Tests (Playwright e2e)
     runs-on: ubuntu-latest
     needs: typecheck
     steps:
@@ -63,7 +63,15 @@ jobs:
           cache: "npm"
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
-      - run: npm test -- --run
+      # There is no vitest/jest unit-test setup in this repo (see README.md
+      # "Testing") — Module 1 built the frontend.md test plan as Playwright
+      # e2e specs under tests/e2e (mocked API, no live backend needed), run
+      # via the "test:e2e" script. `npm test -- --run` referenced a script
+      # that never existed and always failed; this runs what's actually here,
+      # and picks up any module's new specs under tests/e2e automatically
+      # (playwright.config.ts's testDir is not file-specific).
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
 
   build:
     name: Build

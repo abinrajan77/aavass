@@ -103,3 +103,25 @@ export async function mockCommonListEndpoints(page: Page) {
 export async function mockLogin(page: Page, session: LoginResponse) {
   await page.route(`${MOCK_API_PREFIX}/auth/login`, (route) => json(route, session));
 }
+
+/**
+ * Module 2 (specs/02-flat-owner-tenant) fixtures. Flat owners aren't
+ * association members (specs/00-architecture-and-standards.md §5.2), so
+ * their session carries an empty `towers` list and the flat_owner account
+ * type instead.
+ */
+export const OWNER_USER_ID = "user-owner-1";
+
+export const OWNER_SESSION: LoginResponse = {
+  user: {
+    id: OWNER_USER_ID,
+    email: "priya@owner.test",
+    account_type: "flat_owner",
+    is_superuser: false,
+    name: "Priya Owner",
+  },
+  permissions: ["VIEW_TOWER_DATA", "MANAGE_OWN_FLAT"],
+  towers: [],
+};
+
+export { json as fulfillJson };

@@ -27,7 +27,7 @@ from collections.abc import AsyncIterator
 import pytest
 import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
-from sqlalchemy import event, text
+from sqlalchemy import event, insert, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
@@ -51,7 +51,7 @@ async def _create_schema_and_seed(async_url: str) -> None:
         await conn.run_sync(Base.metadata.create_all)
         for code, description in PERMISSION_CATALOG:
             await conn.execute(
-                Permission.__table__.insert().values(
+                insert(Permission).values(
                     id=uuid.uuid4(), code=code, description=description
                 )
             )

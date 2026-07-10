@@ -86,5 +86,11 @@ export const api = {
     apiFetch<T>(path, { ...options, method: "POST", body }),
   put: <T>(path: string, body?: unknown, options?: RequestOptions) =>
     apiFetch<T>(path, { ...options, method: "PUT", body }),
+  // Added for specs/02-flat-owner-tenant/backend.md, whose routes table uses
+  // PATCH (not PUT) for partial updates (FlatOwnershipUpdate, OwnerContactUpdate,
+  // tenant corrections) — Module 1 never needed this verb, so it wasn't on the
+  // shared client yet.
+  patch: <T>(path: string, body?: unknown, options?: RequestOptions) =>
+    apiFetch<T>(path, { ...options, method: "PATCH", body }),
   delete: <T>(path: string, options?: RequestOptions) => apiFetch<T>(path, { ...options, method: "DELETE" }),
 };

@@ -55,7 +55,10 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+      # Deps live in pyproject.toml (no requirements*.txt in this repo, see
+      # README.md "Local setup") — install the package + its "dev" optional
+      # group the same way local dev and every module's test suite does.
+      - run: pip install -e ".[dev]"
       - run: mypy .
 
   test:
@@ -67,7 +70,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install -r requirements.txt -r requirements-dev.txt
+      - run: pip install -e ".[dev]"
       - run: pytest --maxfail=1 --disable-warnings
 
   build-image:
