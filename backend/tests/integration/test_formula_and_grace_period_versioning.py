@@ -2,6 +2,8 @@
 (overview.md edge case 3, acceptance criterion 14). See
 `test_billing_cycle_generation.py`'s module docstring re: sandbox runnability."""
 
+from datetime import date, timedelta
+
 import pytest
 from sqlalchemy import select
 
@@ -47,10 +49,13 @@ async def test_changing_the_formula_does_not_retroact_onto_a_generated_cycle(cli
     original_formula_id = cycle_body["formula_id"]
     original_due_amount = 2000 + 850 * 2  # base + area*rate = 3700.00
 
-    # Now change the formula for *future* cycles.
+    # Now change the formula for *future* cycles. The factory-created formula above is
+    # implicitly effective today, so this change needs a distinct (future) effective_from —
+    # `UNIQUE(tower_id, effective_from)` (backend.md §1.1) rejects a second same-day version.
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     change_resp = await client.post(
         f"/api/v1/towers/{tower.id}/maintenance-formula",
-        json={"base_amount": 5000.00, "per_sqft_rate": 10.00},
+        json={"base_amount": 5000.00, "per_sqft_rate": 10.00, "effective_from": tomorrow},
     )
     assert change_resp.status_code == 201
 
@@ -94,9 +99,13 @@ async def test_changing_grace_period_does_not_retroact_onto_a_generated_cycles_s
     cycle_id = create_resp.json()["id"]
     assert create_resp.json()["grace_period_days_snapshot"] == 5
 
-    # Tower changes its grace period going forward.
+    # Tower changes its grace period going forward. The first config above is implicitly
+    # effective today, so this needs a distinct (future) effective_from — see the analogous
+    # comment in test_changing_the_formula_does_not_retroact_onto_a_generated_cycle.
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     new_grace_resp = await client.post(
-        f"/api/v1/towers/{tower.id}/grace-period-config", json={"grace_period_days": 10}
+        f"/api/v1/towers/{tower.id}/grace-period-config",
+        json={"grace_period_days": 10, "effective_from": tomorrow},
     )
     assert new_grace_resp.status_code == 201
 
@@ -120,9 +129,12 @@ async def test_formula_change_writes_audit_log_with_before_and_after(client, db_
     await db_session.commit()
 
     await _login(client, "formula-audit-admin@example.com")
+    # The factory-created formula above is implicitly effective today, so this change needs a
+    # distinct (future) effective_from — see the analogous comment further up this file.
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
     resp = await client.post(
         f"/api/v1/towers/{tower.id}/maintenance-formula",
-        json={"base_amount": 2500.00, "per_sqft_rate": 3.00},
+        json={"base_amount": 2500.00, "per_sqft_rate": 3.00, "effective_from": tomorrow},
     )
     assert resp.status_code == 201
     new_id = resp.json()["id"]

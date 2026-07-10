@@ -1,7 +1,8 @@
 """Per-tower sequential receipt numbering (backend.md §1.7). Incrementing `next_number` happens
-with `SELECT ... FOR UPDATE` in the same transaction as the `receipts` insert (see
-`app.services.receipts.next_receipt_number`) to guarantee no gaps/collisions under concurrent
-mark-paid calls for the same tower."""
+via an atomic `INSERT ... ON CONFLICT DO UPDATE` in the same transaction as the `receipts`
+insert (see `app.services.receipts.next_receipt_number`) to guarantee no gaps/collisions under
+concurrent mark-paid calls for the same tower — including the very first receipt for a tower,
+when no counter row exists yet."""
 
 from uuid import UUID
 

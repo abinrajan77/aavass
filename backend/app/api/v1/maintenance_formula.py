@@ -2,6 +2,7 @@
 require `VIEW_TOWER_DATA` (tower membership)."""
 
 from datetime import date
+from decimal import Decimal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
@@ -22,11 +23,18 @@ from app.services.billing_formula import get_current_formula
 
 router = APIRouter(prefix="/towers/{tower_id}/maintenance-formula", tags=["maintenance-billing"])
 
+_CENTS = Decimal("0.01")
+
 
 def _formula_dict(formula: MaintenanceFormula) -> dict:
+    # Quantize explicitly rather than relying on the column's post-flush precision: before a
+    # `db.refresh()`, `formula.base_amount`/`per_sqft_rate` still hold whatever Decimal Pydantic
+    # parsed from the request body (which can render as e.g. "2500.0" depending on the JSON
+    # literal), not the DB's NUMERIC(12,2)-normalized value — quantizing keeps the audit
+    # snapshot's precision consistent regardless of when it's taken relative to a refresh.
     return {
-        "base_amount": str(formula.base_amount),
-        "per_sqft_rate": str(formula.per_sqft_rate),
+        "base_amount": str(formula.base_amount.quantize(_CENTS)),
+        "per_sqft_rate": str(formula.per_sqft_rate.quantize(_CENTS)),
         "effective_from": formula.effective_from.isoformat(),
     }
 

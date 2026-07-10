@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from uuid import UUID, uuid4
 
-from sqlalchemy import select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.receipt_counter import ReceiptCounter
@@ -16,23 +16,26 @@ from app.services.pdf import render_receipt_pdf
 
 
 async def next_receipt_number(db: AsyncSession, tower_id: UUID) -> str:
-    """`SELECT ... FOR UPDATE` row lock on the tower's counter row, incremented in the same
-    transaction as the `receipts` insert (backend.md §1.7) — guarantees no gaps/collisions
-    under concurrent mark-paid calls for the same tower. Format: `{tower_code}-{year}-{seq:06d}`,
-    one sequence per tower shared across `due_type` (backend.md §1.6)."""
-    counter = await db.scalar(
-        select(ReceiptCounter).where(ReceiptCounter.tower_id == tower_id).with_for_update()
+    """Atomic upsert-and-increment on the tower's counter row via `INSERT ... ON CONFLICT DO
+    UPDATE`, in the same transaction as the `receipts` insert (backend.md §1.7) — guarantees no
+    gaps/collisions under concurrent mark-paid calls for the same tower, including the very
+    first receipt (when no counter row exists yet): a plain "SELECT, then INSERT-if-missing" is
+    racy there because two concurrent transactions can both see no row and both attempt the
+    INSERT. `ON CONFLICT DO UPDATE` acquires the row lock as part of the single statement, so
+    concurrent callers serialize on it instead of colliding.
+    Format: `{tower_code}-{year}-{seq:06d}`, one sequence per tower shared across `due_type`
+    (backend.md §1.6)."""
+    stmt = (
+        pg_insert(ReceiptCounter)
+        .values(tower_id=tower_id, next_number=2)
+        .on_conflict_do_update(
+            index_elements=[ReceiptCounter.tower_id],
+            set_={"next_number": ReceiptCounter.next_number + 1},
+        )
+        .returning(ReceiptCounter.next_number)
     )
-    if counter is None:
-        # First receipt ever for this tower: we just inserted the row ourselves in this same
-        # transaction, so we already implicitly hold the lock on it — no need to re-query it
-        # under FOR UPDATE.
-        counter = ReceiptCounter(tower_id=tower_id, next_number=1)
-        db.add(counter)
-        await db.flush()
-
-    seq = counter.next_number
-    counter.next_number = seq + 1
+    new_next_number = (await db.execute(stmt)).scalar_one()
+    seq = new_next_number - 1
 
     tower = await db.get(Tower, tower_id)
     assert tower is not None, f"tower {tower_id} must exist (FK-enforced by receipt_counters)"
