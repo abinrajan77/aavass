@@ -80,7 +80,13 @@ export function ExpendituresClient({ towerId }: { towerId: string }) {
   const categoryTotals = useMemo(() => {
     const totals = new Map<ExpenditureCategory, number>();
     for (const e of expenditures) {
-      totals.set(e.category, (totals.get(e.category) ?? 0) + e.amount);
+      // `amount` is typed `number` but the backend serializes Decimal fields as JSON
+      // strings (e.g. "10982.00") — `+` on two strings concatenates rather than adds,
+      // which only broke visibly once a category had 2+ entries (a single string still
+      // coerces fine via Intl.NumberFormat, but concatenating two decimal strings
+      // produces an invalid multi-"." literal that parses to NaN). `Number(...)` is a
+      // harmless no-op when the value is already numeric.
+      totals.set(e.category, (totals.get(e.category) ?? 0) + Number(e.amount));
     }
     return totals;
   }, [expenditures]);
