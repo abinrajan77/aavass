@@ -6,6 +6,7 @@ from app.api.v1 import (
     auth,
     billing_cycles,
     complexes,
+    expenditures,
     flats,
     grace_period,
     health,
@@ -15,6 +16,7 @@ from app.api.v1 import (
     me_flats,
     owners,
     roles,
+    special_collections,
     towers,
 )
 
@@ -34,3 +36,5 @@ api_v1_router.include_router(maintenance_formula.router)
 api_v1_router.include_router(grace_period.router)
 api_v1_router.include_router(billing_cycles.router)
 api_v1_router.include_router(maintenance_dues.router)
+api_v1_router.include_router(special_collections.router)
+api_v1_router.include_router(expenditures.router)

@@ -32,15 +32,22 @@ class Settings(BaseSettings):
     # --- CORS ---
     cors_origins: str = Field(default="http://localhost:3000", alias="CORS_ORIGINS")
 
-    # --- AWS (S3 receipts, SQS billing-cycle-jobs) — 06-cloud-devops.md §4/§5 ---
-    # Both `s3_bucket` and `sqs_queue_url` default to unset: local dev/test runs never talk to
-    # real AWS. `app.services.storage` falls back to writing PDFs under `local_storage_dir`
-    # when `s3_bucket` is unset; `app.services.sqs` no-ops the enqueue (the `jobs` row created
-    # in the same DB transaction is the actual source of truth polled by the client either way)
-    # when `sqs_queue_url` is unset. Set both in staging/prod task definitions via Secrets
-    # Manager/SSM per `06-cloud-devops.md` §3.
+    # --- AWS (S3 receipts + expenditure attachments, SQS billing-cycle-jobs) —
+    # 06-cloud-devops.md §4/§5 ---
+    # `s3_bucket` (Module 3, receipts) defaults to unset: local dev/test runs never talk to
+    # real AWS — `app.services.storage`'s upload_bytes()/presigned_get_url() fall back to
+    # writing under `local_storage_dir` when it's unset. `s3_bucket_name` (Module 4,
+    # expenditure attachments) is the bucket the presigned PUT/GET attachment URLs point at —
+    # exercised against a real (moto-mocked) S3 API in that module's own tests, so it keeps a
+    # concrete default rather than the optional/fallback pattern above. `sqs_queue_url` no-ops
+    # the enqueue (the `jobs` row created in the same DB transaction is the actual source of
+    # truth polled by the client either way) when unset. Set these in staging/prod task
+    # definitions via Secrets Manager/SSM per `06-cloud-devops.md` §3.
     aws_region: str = Field(default="ap-south-1", alias="AWS_REGION")
     s3_bucket: str | None = Field(default=None, alias="S3_BUCKET")
+    s3_bucket_name: str = Field(default="aavaas-local-files", alias="S3_BUCKET_NAME")
+    # Only set in local/test envs (moto, localstack) to redirect boto3 away from real AWS.
+    s3_endpoint_url: str | None = Field(default=None, alias="S3_ENDPOINT_URL")
     sqs_queue_url: str | None = Field(default=None, alias="SQS_BILLING_CYCLE_QUEUE_URL")
     local_storage_dir: str = Field(default="./local_storage", alias="LOCAL_STORAGE_DIR")
 

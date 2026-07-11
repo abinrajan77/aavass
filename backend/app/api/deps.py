@@ -111,3 +111,44 @@ def require_permission(permission_code: str):
         return member
 
     return dependency
+
+
+def require_permission_with_member_id(permission_code: str):
+    """Like `require_permission`, but resolves a concrete `association_members.id` for the
+    acting user rather than allowing `None` through for a superuser.
+
+    Module 4's `special_collections`/`expenditures` tables have `NOT NULL` FKs
+    (`created_by`/`recorded_by`) to `association_members` — a superuser bypasses tower RBAC
+    entirely (see `require_permission`) and therefore normally has no membership row for a
+    given tower. If the tower also has no active membership for that user, this raises
+    `ASSOCIATION_MEMBERSHIP_REQUIRED` rather than writing a nonsensical FK value; if one
+    exists (e.g. a superuser who is *also* provisioned as an association member of this
+    tower), it is used.
+    """
+    base_dependency = require_permission(permission_code)
+
+    async def dependency(
+        tower_id: UUID = Path(...),
+        current_user: User = Depends(get_current_user),
+        db: AsyncSession = Depends(get_db),
+        member: AssociationMember | None = Depends(base_dependency),
+    ) -> AssociationMember:
+        if member is not None:
+            return member
+
+        resolved = await db.scalar(
+            select(AssociationMember).where(
+                AssociationMember.user_id == current_user.id,
+                AssociationMember.tower_id == tower_id,
+                AssociationMember.deactivated_at.is_(None),
+            )
+        )
+        if resolved is None:
+            raise AppError(
+                403,
+                "ASSOCIATION_MEMBERSHIP_REQUIRED",
+                "This action requires an active association membership in this tower.",
+            )
+        return resolved
+
+    return dependency

@@ -174,3 +174,23 @@ export function vacateFlatTenant(
 export function getMyFlats() {
   return api.get<Flat[]>("/api/v1/me/flats");
 }
+
+export interface ActiveFlatCount {
+  count: number;
+}
+
+/**
+ * Live per-flat count for the special-collection create dialog's split preview
+ * (specs/04-special-collections-expenditure/frontend.md). Module 2's real
+ * `GET .../flats` endpoint (see `listFlats` above) doesn't have a dedicated
+ * `count_only` mode — this was written against a hypothetical contract before
+ * Module 2 landed — so it's derived from the paginated envelope's `total`
+ * instead (`page_size: 1`, since only `total` is needed, not the row data).
+ * Callers (special-collections-client.tsx) still fall back to the tower's
+ * configured `total_flats` with a disclaimer if this errors.
+ */
+export function getActiveFlatCount(towerId: string): Promise<ActiveFlatCount> {
+  return listFlats(towerId, { page: 1, page_size: 1 }).then((result) => ({
+    count: result.total,
+  }));
+}

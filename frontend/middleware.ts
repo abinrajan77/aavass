@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { SESSION_COOKIE_NAME, type Session } from "@/lib/session";
+import { PERMISSIONS } from "@/lib/permissions";
 
 /**
  * Route-level auth/RBAC gating — per specs/00-architecture-and-standards.md §5.3
@@ -75,6 +76,20 @@ export function middleware(request: NextRequest) {
     if (!hasAccess) {
       return NextResponse.redirect(new URL("/not-authorized", request.url));
     }
+
+    // Module 4 (specs/04-special-collections-expenditure/frontend.md route
+    // guard note): "/expenditures/new redirects flat owners away (no
+    // MANAGE_EXPENDITURE)". This is UX only, same caveat as the rest of this
+    // file — the backend's require_permission("MANAGE_EXPENDITURE") is the
+    // real boundary.
+    if (
+      pathname === `/towers/${towerId}/expenditures/new` &&
+      !session.user.is_superuser &&
+      !session.permissions.includes(PERMISSIONS.MANAGE_EXPENDITURE)
+    ) {
+      return NextResponse.redirect(new URL("/not-authorized", request.url));
+    }
+
     return NextResponse.next();
   }
 

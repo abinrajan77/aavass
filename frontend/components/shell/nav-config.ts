@@ -1,5 +1,6 @@
 import { PERMISSIONS } from "@/lib/permissions";
 import {
+  Banknote,
   Building2,
   Calculator,
   CalendarClock,
@@ -77,6 +78,22 @@ export const TOWER_NAV_ITEMS: NavItem[] = [
   {
     label: "Dues",
     href: (towerId) => `/towers/${towerId}/billing/dues`,
+    icon: Receipt,
+    permission: PERMISSIONS.VIEW_TOWER_DATA,
+  },
+  {
+    // Module 4 — specs/04-special-collections-expenditure/frontend.md routes
+    // table: "Admin: full; Flat Owner: read-only" — every tower member has
+    // at least VIEW_TOWER_DATA, so gate on that (never MANAGE_SPECIAL_COLLECTIONS,
+    // which would hide the read-only view from flat owners).
+    label: "Special Collections",
+    href: (towerId) => `/towers/${towerId}/special-collections`,
+    icon: Banknote,
+    permission: PERMISSIONS.VIEW_TOWER_DATA,
+  },
+  {
+    label: "Expenditures",
+    href: (towerId) => `/towers/${towerId}/expenditures`,
     icon: Receipt,
     permission: PERMISSIONS.VIEW_TOWER_DATA,
   },

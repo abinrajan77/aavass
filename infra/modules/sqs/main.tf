@@ -6,6 +6,15 @@
 # (Maintenance Billing -> billing_cycle jobs) and 4 (Special Collections/
 # Expenditure -> report_export jobs) need zero infra changes when they land.
 # Left intentionally idle/unconsumed until then.
+#
+# `special-collection-jobs` (added per
+# specs/04-special-collections-expenditure/cloud.md "SQS / async jobs") backs
+# the `special_collection` job type: async due-generation for special
+# collections on towers whose active-flat count exceeds the sync threshold
+# (>300 flats, same async-threshold logic as billing cycles). Module 4's
+# backend is explicitly scoping that async path OUT of this round (it depends
+# on Module 3 landing first) — this queue is provisioned now, ready and idle,
+# so no infra change is needed when that worker logic is built.
 
 locals {
   common_tags = merge(var.tags, {
@@ -14,7 +23,7 @@ locals {
     Project     = "aavaas"
   })
 
-  queue_names = ["billing-cycle-jobs", "report-export-jobs"]
+  queue_names = ["billing-cycle-jobs", "report-export-jobs", "special-collection-jobs"]
 }
 
 resource "aws_sqs_queue" "dlq" {

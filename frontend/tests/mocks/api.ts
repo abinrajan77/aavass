@@ -98,6 +98,19 @@ export async function mockCommonListEndpoints(page: Page) {
   await page.route(`${MOCK_API_PREFIX}/complexes*`, (route) =>
     json(route, { items: [], page: 1, page_size: 100, total: 0 })
   );
+  // Module 4 fallbacks (specs/04-special-collections-expenditure/frontend.md)
+  // — empty-list defaults so pages under test don't error on unrelated
+  // fetches; individual e2e specs override with `page.route()` for the
+  // scenario they're asserting on.
+  await page.route(`${MOCK_API_PREFIX}/special-collections*`, (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return json(route, { items: [], page: 1, page_size: 100, total: 0 });
+  });
+  await page.route(`${MOCK_API_PREFIX}/expenditures*`, (route) => {
+    if (route.request().method() !== "GET") return route.fallback();
+    return json(route, { items: [], page: 1, page_size: 100, total: 0 });
+  });
+  await page.route(`${MOCK_API_PREFIX}/flats*`, (route) => json(route, { count: 20 }));
 }
 
 export async function mockLogin(page: Page, session: LoginResponse) {
