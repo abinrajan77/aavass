@@ -10,6 +10,7 @@ import {
   SidebarMenuItem,
 } from "@/components/ui/sidebar";
 import { useSession } from "@/components/providers/session-provider";
+import { hasPermission } from "@/lib/permissions";
 import { TOWER_NAV_ITEMS } from "./nav-config";
 import { cn } from "@/lib/utils";
 
@@ -18,7 +19,10 @@ import { cn } from "@/lib/utils";
  * NEVER a hardcoded role-name check — per
  * specs/01-auth-rbac-tower-setup/frontend.md "What must NOT break": a future
  * custom role with a subset of Admin's permissions must still see the
- * correct partial nav.
+ * correct partial nav. `hasPermission()` bypasses this for a superuser
+ * (whose `session.permissions` is always `[]`), mirroring the backend's
+ * `require_permission()` bypass — otherwise a superuser sees an empty
+ * tower nav despite the backend granting them full access.
  *
  * Active item gets a `border-l-2 border-accent` gold bar, per the "Theme
  * application" section — the only place gold appears outside status badges
@@ -29,7 +33,7 @@ export function SidebarNav({ towerId }: { towerId: string }) {
   const pathname = usePathname();
 
   const items = TOWER_NAV_ITEMS.filter(
-    (item) => !item.permission || session?.permissions.includes(item.permission)
+    (item) => !item.permission || hasPermission(session, item.permission)
   );
 
   return (

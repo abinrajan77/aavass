@@ -38,7 +38,7 @@ export async function getSession(): Promise<Session | null> {
 
 export function hasPermission(session: Session | null, permission: string): boolean {
   if (!session) return false;
-  return session.permissions.includes(permission);
+  return session.user.is_superuser || session.permissions.includes(permission);
 }
 
 export function hasTowerAccess(session: Session | null, towerId: string): boolean {

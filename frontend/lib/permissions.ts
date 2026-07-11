@@ -1,3 +1,5 @@
+import type { LoginResponse } from "./api/types";
+
 /**
  * Permission catalog — mirrors specs/00-architecture-and-standards.md §5.1.
  *
@@ -54,3 +56,22 @@ export const PERMISSION_CATALOG: { code: Permission; description: string }[] = [
     description: "Flat owner: edit own contact/tenant/occupancy details",
   },
 ];
+
+/**
+ * Client-safe permission check — a superuser bypasses every tower-level
+ * permission (mirroring the backend's `require_permission()` bypass, see
+ * `00-architecture-and-standards.md` §5.3), since `session.permissions` is
+ * always `[]` for a superuser (they're not an `AssociationMember`, so no
+ * tower role/permission set applies to them). Without this bypass, nav
+ * items and `<Can>`-gated actions silently disappear for a superuser even
+ * though the backend grants them full access.
+ *
+ * `lib/session.ts` has an equivalent `hasPermission()`, but that module is
+ * `server-only` and can't be imported from client components like
+ * `components/shell/sidebar-nav.tsx` / `components/auth/can.tsx` — this is
+ * the client-safe counterpart both use.
+ */
+export function hasPermission(session: LoginResponse | null, permission: string): boolean {
+  if (!session) return false;
+  return session.user.is_superuser || session.permissions.includes(permission);
+}
