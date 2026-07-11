@@ -31,10 +31,12 @@ from sqlalchemy import event, insert, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from testcontainers.postgres import PostgresContainer
 
+from app.core.notification_templates import NOTIFICATION_TEMPLATE_SEED
 from app.core.permissions import PERMISSION_CATALOG
 from app.db.base import Base
 from app.db.session import get_db
 from app.main import app
+from app.models.notification_template import NotificationTemplate
 from app.models.permission import Permission
 
 
@@ -53,6 +55,21 @@ async def _create_schema_and_seed(async_url: str) -> None:
             await conn.execute(
                 insert(Permission).values(
                     id=uuid.uuid4(), code=code, description=description
+                )
+            )
+        # `Base.metadata.create_all` (above) never runs the Alembic migrations, so
+        # `notification_templates`'s seed data (inserted in the migration's own `upgrade()`)
+        # would otherwise be missing here — seed it the same way `PERMISSION_CATALOG` is
+        # seeded above, from the single shared source
+        # `app.core.notification_templates.NOTIFICATION_TEMPLATE_SEED`.
+        for event_type, recipient_role, template_text in NOTIFICATION_TEMPLATE_SEED:
+            await conn.execute(
+                insert(NotificationTemplate).values(
+                    id=uuid.uuid4(),
+                    event_type=event_type,
+                    recipient_role=recipient_role,
+                    channel="generic",
+                    template_text=template_text,
                 )
             )
     await eng.dispose()

@@ -14,7 +14,10 @@ from app.api.v1 import (
     maintenance_dues,
     maintenance_formula,
     me_flats,
+    notifications,
+    owner_portal,
     owners,
+    reports,
     roles,
     special_collections,
     towers,
@@ -38,3 +41,6 @@ api_v1_router.include_router(billing_cycles.router)
 api_v1_router.include_router(maintenance_dues.router)
 api_v1_router.include_router(special_collections.router)
 api_v1_router.include_router(expenditures.router)
+api_v1_router.include_router(reports.router)
+api_v1_router.include_router(owner_portal.router)
+api_v1_router.include_router(notifications.router)

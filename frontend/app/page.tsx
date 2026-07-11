@@ -6,8 +6,9 @@ import { getSession } from "@/lib/session";
  * specs/01-auth-rbac-tower-setup/frontend.md routes table:
  *   - superuser        -> /admin/complexes
  *   - tower admin       -> /towers/[towerId] (their tower, or a picker if >1)
- *   - flat owner        -> Module 5's owner dashboard (stub here; that module
- *                          owns the real screen)
+ *   - flat owner        -> /my-flats (Module 5's owner-portal landing —
+ *                          picks a single flat automatically, or shows a
+ *                          Command-palette picker for >1)
  *
  * middleware.ts already redirects unauthenticated requests to /login before
  * this ever renders, but we guard again for direct server-render safety.
@@ -24,7 +25,7 @@ export default async function RootPage() {
   }
 
   if (session.user.account_type === "flat_owner") {
-    redirect("/owner-dashboard");
+    redirect("/my-flats");
   }
 
   if (session.towers.length === 1) {

@@ -136,3 +136,60 @@ export async function apiFetchWithStatus<T>(
 
   return { status: res.status, data: payload as T };
 }
+
+export type FileOrAccepted<T> =
+  | { kind: "file"; blob: Blob; filename: string | null }
+  | { kind: "accepted"; status: number; data: T };
+
+/**
+ * Like `apiFetchWithStatus`, but for endpoints where a 2xx response is
+ * *either* a rendered file stream *or* a JSON body, depending on server-side
+ * logic the client doesn't control — specifically Module 5's report export
+ * endpoints (specs/05-reporting-owner-portal-notifications/backend.md §2.6):
+ * `?format=pdf|csv` renders the file synchronously (200, `content-type`
+ * `application/pdf`/`text/csv`) for <=5000 rows, or returns `202
+ * { job_id }` (JSON) beyond that. Neither `apiFetch` (assumes JSON, returns
+ * `null` for a non-JSON body) nor `apiFetchWithStatus` (same JSON
+ * assumption) can represent the file branch, so this is a small, generic
+ * addition to the shared client rather than a one-off fetch reimplemented
+ * per report.
+ */
+export async function apiFetchFileOrJson<T>(
+  path: string,
+  options: RequestOptions = {}
+): Promise<FileOrAccepted<T>> {
+  const { body, params, headers, ...rest } = options;
+
+  const res = await fetch(buildUrl(path, params), {
+    ...rest,
+    credentials: "include",
+    headers: {
+      ...(body !== undefined ? { "Content-Type": "application/json" } : {}),
+      ...headers,
+    },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+
+  const contentType = res.headers.get("content-type") ?? "";
+  const isJson = contentType.includes("application/json");
+
+  if (!res.ok) {
+    const payload = isJson ? await res.json().catch(() => null) : null;
+    const problem: ProblemDetails = payload ?? {
+      error_code: "UNKNOWN_ERROR",
+      message: res.statusText || "Request failed",
+      field_errors: null,
+    };
+    throw new ApiError(res.status, problem);
+  }
+
+  if (isJson) {
+    const data = (await res.json()) as T;
+    return { kind: "accepted", status: res.status, data };
+  }
+
+  const blob = await res.blob();
+  const disposition = res.headers.get("content-disposition");
+  const match = disposition?.match(/filename="?([^";]+?)"?(;|$)/);
+  return { kind: "file", blob, filename: match?.[1] ?? null };
+}

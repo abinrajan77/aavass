@@ -274,6 +274,18 @@ export interface JobStatusResponse {
   job_id: string;
   status: JobStatus;
   error?: string | null;
+  /**
+   * Additive fields per 06-cloud-devops.md §4's actual documented shape
+   * (`{ job_id, job_type, status, result, error_message }`) — Module 3
+   * (billing-cycle generation) only ever needed `status`/`error` and didn't
+   * type these, but Module 5's report-export jobs need `result.download_url`
+   * once `status: "done"`. Purely additive/optional so Module 3's existing
+   * usage (`hooks/use-job-status.ts`, `generate-cycle-dialog.tsx`) is
+   * unaffected.
+   */
+  job_type?: string;
+  result?: { download_url?: string } | null;
+  error_message?: string | null;
 }
 
 /**
@@ -361,4 +373,192 @@ export interface AttachmentUploadUrlResponse {
 
 export interface AttachmentUrlResponse {
   url: string;
+}
+
+/**
+ * Module 5 (Reporting, Owner Portal & Notifications) shapes, mirrored 1:1
+ * from specs/05-reporting-owner-portal-notifications/backend.md §2-§4. The
+ * backend is being built concurrently to this same spec by another agent —
+ * these types describe the agreed contract, not something inspected from a
+ * live backend.
+ */
+
+// --- §2.1 Monthly Collection Report ----------------------------------------
+
+export interface CollectionReportRow {
+  flat_number: string;
+  owner_names: string[];
+  resident_type: "owner" | "tenant";
+  resident_name: string;
+  amount_due: number;
+  status: "paid" | "pending" | "overdue";
+  payment_date: string | null;
+  payment_mode: PaymentMode | null;
+  reference_number: string | null;
+  receipt_number: string | null;
+}
+
+export interface CollectionReportTotals {
+  total_due: number;
+  total_paid: number;
+  total_pending: number;
+  total_overdue: number;
+}
+
+export interface CollectionReportResponse {
+  tower_id: string;
+  billing_cycle_id: string;
+  billing_month: number;
+  billing_year: number;
+  generated_at: string;
+  items: CollectionReportRow[];
+  totals: CollectionReportTotals;
+}
+
+// --- §2.2 Outstanding Dues Report -------------------------------------------
+
+export interface OutstandingDueRow {
+  flat_number: string;
+  due_type: "maintenance" | "special_collection";
+  owner_names: string[];
+  resident_name: string;
+  amount_due: number;
+  due_date: string;
+  grace_period_days: number;
+  days_overdue: number;
+}
+
+export interface OutstandingDuesReportResponse {
+  tower_id: string;
+  as_of_date: string;
+  items: OutstandingDueRow[];
+  total_outstanding: number;
+}
+
+// --- §2.3 Expenditure Report -------------------------------------------------
+
+export interface ExpenditureReportRow {
+  date: string;
+  category: ExpenditureCategory;
+  description: string;
+  vendor_payee: string;
+  amount: number;
+  payment_mode: string;
+  has_attachment: boolean;
+}
+
+export interface CategoryTotal {
+  category: string;
+  total: number;
+}
+
+export interface ExpenditureReportResponse {
+  tower_id: string;
+  period_start: string;
+  period_end: string;
+  items: ExpenditureReportRow[];
+  category_totals: CategoryTotal[];
+  grand_total: number;
+}
+
+// --- §2.4 Collection vs Expenditure Summary ----------------------------------
+
+export type ReportPeriodType = "month" | "financial_year";
+
+export interface CollectionVsExpenditureResponse {
+  tower_id: string;
+  period_label: string;
+  maintenance_collected: number;
+  special_collection_collected: number;
+  total_collected: number;
+  total_expenditure: number;
+  net: number;
+  expenditure_by_category: CategoryTotal[];
+}
+
+// --- §2.5 Tenant Register -----------------------------------------------------
+
+export interface TenantRegisterRow {
+  flat_number: string;
+  tenant_name: string;
+  phone_number: string;
+  email: string | null;
+  lease_start: string;
+  lease_end: string | null;
+  is_current: boolean;
+}
+
+export interface TenantRegisterResponse {
+  tower_id: string;
+  items: TenantRegisterRow[];
+}
+
+// --- §3 Owner self-service portal --------------------------------------------
+
+export type CurrentDueStatus = "paid" | "pending" | "overdue" | "no_active_due";
+
+export interface OwnedFlatSummary {
+  flat_id: string;
+  tower_id: string;
+  tower_name: string;
+  flat_number: string;
+  occupancy_status: OccupancyStatus;
+  is_primary_owner: boolean;
+  current_due_status: CurrentDueStatus;
+}
+
+export interface OwnedFlatsTowerGroup {
+  tower_id: string;
+  tower_name: string;
+  flats: OwnedFlatSummary[];
+}
+
+/** GET /api/v1/owners/me/flats-summary — NOT Module 2's GET /api/v1/me/flats, see backend.md §3.1. */
+export interface OwnedFlatsResponse {
+  towers: OwnedFlatsTowerGroup[];
+}
+
+export interface OwnerReceiptSummary {
+  receipt_id: string;
+  receipt_number: string;
+  billing_period: string;
+  download_url: string;
+}
+
+export interface OwnerYtdTotals {
+  total_due_ytd: number;
+  total_paid_ytd: number;
+}
+
+/** GET /api/v1/owners/me/flats/{flat_id}/dashboard — backend.md §3.2. */
+export interface OwnerFlatDashboardResponse {
+  flat_id: string;
+  tower_id: string;
+  flat_number: string;
+  current_due: CollectionReportRow | null;
+  payment_history: CollectionReportRow[];
+  receipts: OwnerReceiptSummary[];
+  tower_expenditures: ExpenditureReportRow[];
+  tenant_history: TenantRegisterRow[];
+  ytd_totals: OwnerYtdTotals;
+}
+
+// --- §4 Notification template preview ----------------------------------------
+
+export type NotificationEvent = "due_generated" | "overdue_reminder" | "payment_confirmed";
+export type NotificationDueType = "maintenance" | "special_collection";
+
+export interface NotificationMessage {
+  recipient: "tenant" | "owner";
+  recipient_name: string;
+  recipient_phone: string;
+  message_text: string;
+}
+
+/** GET /api/v1/notifications/templates/preview — backend.md §4. No delivery-status field, no send action. */
+export interface NotificationPreviewResponse {
+  event: NotificationEvent;
+  due_id: string;
+  flat_number: string;
+  messages: NotificationMessage[];
 }

@@ -1,6 +1,7 @@
 import { PERMISSIONS } from "@/lib/permissions";
 import {
   Banknote,
+  BarChart3,
   Building2,
   Calculator,
   CalendarClock,
@@ -96,6 +97,15 @@ export const TOWER_NAV_ITEMS: NavItem[] = [
     href: (towerId) => `/towers/${towerId}/expenditures`,
     icon: Receipt,
     permission: PERMISSIONS.VIEW_TOWER_DATA,
+  },
+  // Module 5 — Reporting (specs/05-reporting-owner-portal-notifications/
+  // frontend.md §1 routes table): admin-only (VIEW_REPORTS), never shown to
+  // a flat owner (owners use the separate /my-flats portal, not this nav).
+  {
+    label: "Reports",
+    href: (towerId) => `/towers/${towerId}/reports`,
+    icon: BarChart3,
+    permission: PERMISSIONS.VIEW_REPORTS,
   },
 ];
 

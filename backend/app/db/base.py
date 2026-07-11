@@ -16,12 +16,14 @@ from app.models.association_member import AssociationMember  # noqa: E402, F401
 from app.models.audit_log import AuditLog  # noqa: E402, F401
 from app.models.billing_cycle import BillingCycle  # noqa: E402, F401
 from app.models.expenditure import Expenditure  # noqa: E402, F401
+from app.models.export_job import ExportJob  # noqa: E402, F401
 from app.models.flat import Flat  # noqa: E402, F401
 from app.models.flat_ownership import FlatOwnership  # noqa: E402, F401
 from app.models.grace_period_config import GracePeriodConfig  # noqa: E402, F401
 from app.models.job import Job  # noqa: E402, F401
 from app.models.maintenance_due import MaintenanceDue  # noqa: E402, F401
 from app.models.maintenance_formula import MaintenanceFormula  # noqa: E402, F401
+from app.models.notification_template import NotificationTemplate  # noqa: E402, F401
 from app.models.owner import Owner  # noqa: E402, F401
 from app.models.password_reset_token import PasswordResetToken  # noqa: E402, F401
 from app.models.payment import Payment  # noqa: E402, F401

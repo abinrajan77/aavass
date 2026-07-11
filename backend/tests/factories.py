@@ -14,9 +14,11 @@ from app.models.apartment_complex import ApartmentComplex
 from app.models.association_member import AssociationMember
 from app.models.billing_cycle import BillingCycle
 from app.models.expenditure import Expenditure
+from app.models.export_job import ExportJob
 from app.models.flat import Flat
 from app.models.flat_ownership import FlatOwnership
 from app.models.grace_period_config import GracePeriodConfig
+from app.models.maintenance_due import MaintenanceDue
 from app.models.maintenance_formula import MaintenanceFormula
 from app.models.owner import Owner
 from app.models.permission import Permission
@@ -285,6 +287,72 @@ async def make_billing_cycle(
     db.add(cycle)
     await db.flush()
     return cycle
+
+
+async def make_maintenance_due(
+    db: AsyncSession,
+    *,
+    billing_cycle_id: UUID,
+    tower_id: UUID,
+    flat_id: UUID,
+    primary_owner_id: UUID,
+    amount: Decimal = Decimal("2000.00"),
+    carpet_area_snapshot: Decimal = Decimal("850.00"),
+    assigned_to_type: str = "owner",
+    assigned_to_id: UUID | None = None,
+    assigned_to_name_snapshot: str = "Asha Rao",
+    due_date: date = date(2026, 7, 10),
+    status: str = "pending",
+) -> MaintenanceDue:
+    """Module 5 report-test convenience: a bare `MaintenanceDue` row, no Module 3 HTTP flow
+    involved (tests that need mark-paid's side effects — a real `Payment`/`Receipt` row — call
+    `app.services.payments.record_payment` directly instead, exactly like Module 3's own
+    `tests/integration/test_mark_paid.py` does)."""
+    due = MaintenanceDue(
+        billing_cycle_id=billing_cycle_id,
+        tower_id=tower_id,
+        flat_id=flat_id,
+        amount=amount,
+        carpet_area_snapshot=carpet_area_snapshot,
+        assigned_to_type=assigned_to_type,
+        assigned_to_id=assigned_to_id or primary_owner_id,
+        assigned_to_name_snapshot=assigned_to_name_snapshot,
+        primary_owner_id_snapshot=primary_owner_id,
+        due_date=due_date,
+        status=status,
+    )
+    db.add(due)
+    await db.flush()
+    return due
+
+
+async def make_export_job(
+    db: AsyncSession,
+    *,
+    tower_id: UUID,
+    requested_by: UUID,
+    report_type: str = "tenant_register",
+    format: str = "csv",
+    params: dict | None = None,
+    status: str = "pending",
+) -> ExportJob:
+    """Bare `export_jobs` row — used by idempotency tests to pre-seed a `pending`/`running`
+    job with a known natural key before exercising the export endpoint's dedup check. Does
+    NOT create a paired `jobs` row (see `app.services.export.get_or_create_export_job`'s
+    docstring) — tests that need the paired row for a duplicate-request scenario go through
+    that real function instead of this bare factory."""
+    export_job = ExportJob(
+        id=uuid4(),  # no server-side default (see app/models/export_job.py) — mint one here
+        tower_id=tower_id,
+        report_type=report_type,
+        format=format,
+        params=params or {},
+        status=status,
+        requested_by=requested_by,
+    )
+    db.add(export_job)
+    await db.flush()
+    return export_job
 
 
 async def make_billing_admin(

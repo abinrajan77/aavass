@@ -65,6 +65,17 @@ export function middleware(request: NextRequest) {
     return NextResponse.next();
   }
 
+  // Module 5 (specs/05-reporting-owner-portal-notifications/frontend.md §1
+  // route guards): "middleware.ts redirects non-owners away from
+  // /my-flats/*" — a superuser has no FlatOwnership rows either, so is
+  // treated the same as any other non-owner account type here.
+  if (pathname.startsWith("/my-flats")) {
+    if (session.user.account_type !== "flat_owner") {
+      return NextResponse.redirect(new URL("/not-authorized", request.url));
+    }
+    return NextResponse.next();
+  }
+
   // Coarse gate: /towers/[towerId]/* requires *some* access to that tower.
   // Fine-grained permission checks (e.g. MANAGE_ASSOCIATION_MEMBERS for the
   // roles screen) happen in the page/component via <Can> and, authoritatively,
@@ -86,6 +97,18 @@ export function middleware(request: NextRequest) {
       pathname === `/towers/${towerId}/expenditures/new` &&
       !session.user.is_superuser &&
       !session.permissions.includes(PERMISSIONS.MANAGE_EXPENDITURE)
+    ) {
+      return NextResponse.redirect(new URL("/not-authorized", request.url));
+    }
+
+    // Module 5 (specs/05-reporting-owner-portal-notifications/frontend.md §1
+    // route guards): a coarse VIEW_REPORTS check for /reports and
+    // /notifications/* — same UX-only caveat as the rest of this file, the
+    // backend's require_permission("VIEW_REPORTS") is the real boundary.
+    if (
+      (pathname === `/towers/${towerId}/reports` || pathname.startsWith(`/towers/${towerId}/notifications/`)) &&
+      !session.user.is_superuser &&
+      !session.permissions.includes(PERMISSIONS.VIEW_REPORTS)
     ) {
       return NextResponse.redirect(new URL("/not-authorized", request.url));
     }
