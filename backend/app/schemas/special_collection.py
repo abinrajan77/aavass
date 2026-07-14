@@ -6,6 +6,8 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field
 
+from app.schemas.receipt import ReceiptOut
+
 
 class SplitBasis(str, Enum):
     equal = "equal"
@@ -60,3 +62,11 @@ class SpecialCollectionDueOut(BaseModel):
     status: Literal["pending", "paid", "overdue"]
 
     model_config = {"from_attributes": True}
+
+
+class SpecialCollectionMarkPaidResponse(BaseModel):
+    """backend.md §"POST .../dues/{due_id}/mark-paid" response — mirrors Module 3's
+    `MarkPaidResponse` shape (due + receipt), reusing the same `ReceiptOut`."""
+
+    due: SpecialCollectionDueOut
+    receipt: ReceiptOut

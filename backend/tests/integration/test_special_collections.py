@@ -1,4 +1,5 @@
-"""Integration tests for the special-collections slice — backend.md test plan items 1-5.
+"""Integration tests for the special-collections slice — backend.md test plan items 1-5, plus
+mark-paid (item 6, see `test_mark_special_collection_due_paid_*` below).
 
 Module 2 (Flat/Owner/Tenant) doesn't exist in this codebase yet, so every test here
 overrides `app.services.flat_directory.get_flat_directory` with a `FakeFlatDirectory`
@@ -7,9 +8,9 @@ seeded via `make_active_flat_record` (see `tests/factories.py`) — the same
 exercises the real HTTP endpoint, the real equal-split algorithm, and real DB writes; only
 the Module-2 data source is swapped.
 
-Items 6-8 (mark-paid, receipt, overdue transition) hard-depend on Module 3's
-`record_payment()` service, which doesn't exist yet either — out of scope per this module's
-backend.md scope note, not covered here.
+Mark-paid delegates to Module 3's shared `record_payment(due_type="special_collection", ...)`
+— `app/services/special_collection.py` registers the due/label/owner-name resolvers that
+dispatch needs at import time.
 """
 
 from decimal import Decimal
@@ -288,5 +289,66 @@ async def test_special_collection_can_cancel_when_no_dues_paid(client, db_sessio
         )
         assert delete_resp.status_code == 200
         assert delete_resp.json()["id"] == collection_id
+    finally:
+        _clear_flat_directory_override()
+
+
+@pytest.mark.asyncio
+async def test_mark_special_collection_due_paid_creates_receipt_and_flips_status(
+    client, db_session
+):
+    tower, user = await _setup_tower_with_admin(
+        db_session,
+        permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA", "RECORD_PAYMENT"],
+    )
+    flats = [make_active_flat_record(flat_number="101", owner_name="Asha Rao")]
+    _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
+    try:
+        await _login(client, user.email)
+        create_resp = await client.post(
+            f"/api/v1/towers/{tower.id}/special-collections",
+            json={
+                "title": "Lift Modernization Fund",
+                "total_amount": "1000.00",
+                "due_date": "2026-09-01",
+            },
+        )
+        collection_id = create_resp.json()["id"]
+        due_id = (
+            await client.get(f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues")
+        ).json()["items"][0]["id"]
+
+        resp = await client.patch(
+            f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues/{due_id}/mark-paid",
+            json={
+                "payment_date": "2026-09-05",
+                "amount_received": "1000.00",
+                "payment_mode": "cash",
+                "reference_number": None,
+            },
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["due"]["status"] == "paid"
+        assert body["receipt"]["receipt_number"]
+        assert body["receipt"]["owner_name_snapshot"] == "Asha Rao"
+        assert (
+            body["receipt"]["billing_period_label"]
+            == "Special Collection: Lift Modernization Fund"
+        )
+        assert body["receipt"]["download_url"]
+
+        # A second mark-paid on the same due must not double-pay.
+        second = await client.patch(
+            f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues/{due_id}/mark-paid",
+            json={
+                "payment_date": "2026-09-06",
+                "amount_received": "1000.00",
+                "payment_mode": "cash",
+                "reference_number": None,
+            },
+        )
+        assert second.status_code == 409
+        assert second.json()["error_code"] == "DUE_ALREADY_PAID"
     finally:
         _clear_flat_directory_override()

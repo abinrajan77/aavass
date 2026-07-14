@@ -6,6 +6,11 @@ confined to the router layer — `compute_equal_split` (pure) and `generate_dues
 below are exactly the functions an async worker would call too; only the router's
 sync-vs-enqueue branch needs to change later. Neither function here knows or cares whether
 it's running inline in the request or inside a background job.
+
+Also registers this module's `record_payment()` dispatch-table entries (backend.md §"Reuse of
+Module 3 payment/receipt flow") at import time — `app/api/v1/special_collections.py` imports
+this module, and that router is imported by `app/api/v1/__init__.py` at app startup, so the
+registration below always runs before any request is handled.
 """
 
 import re
@@ -18,14 +23,55 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.errors import AppError
 from app.models.special_collection import SpecialCollection
 from app.models.special_collection_due import SpecialCollectionDue
 from app.services.flat_directory import ActiveFlatRecord
+from app.services.payments import (
+    register_due_resolver,
+    register_label_resolver,
+    register_owner_name_resolver,
+)
 
 # backend.md: beyond this many active flats, generation should move to the
 # `special-collection-jobs` SQS path. Not implemented in this slice (see module docstring
 # and cloud.md) — kept here so the threshold is documented and easy to wire up later.
 SYNC_DUE_GENERATION_FLAT_THRESHOLD = 300
+
+
+async def _resolve_special_collection_due(
+    db: AsyncSession, *, due_id: UUID, tower_id: UUID
+) -> SpecialCollectionDue:
+    due = await db.scalar(
+        select(SpecialCollectionDue).where(
+            SpecialCollectionDue.id == due_id, SpecialCollectionDue.tower_id == tower_id
+        )
+    )
+    if due is None:
+        raise AppError(404, "DUE_NOT_FOUND", "Special collection due not found.")
+    return due
+
+
+async def _special_collection_billing_period_label(
+    db: AsyncSession, due: SpecialCollectionDue
+) -> str:
+    collection = await db.get(SpecialCollection, due.special_collection_id)
+    assert collection is not None, (
+        f"special_collection {due.special_collection_id} must exist (FK-enforced)"
+    )
+    # backend.md: "populated with 'Special Collection: {special_collection.title}' instead of
+    # a maintenance billing-cycle label".
+    return f"Special Collection: {collection.title}"
+
+
+async def _special_collection_owner_name(db: AsyncSession, due: SpecialCollectionDue) -> str:
+    # Already denormalized on the due row at generation time — no join needed.
+    return due.owner_name
+
+
+register_due_resolver("special_collection", _resolve_special_collection_due)
+register_label_resolver("special_collection", _special_collection_billing_period_label)
+register_owner_name_resolver("special_collection", _special_collection_owner_name)
 
 
 @dataclass(frozen=True)

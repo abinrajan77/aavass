@@ -562,3 +562,37 @@ export interface NotificationPreviewResponse {
   flat_number: string;
   messages: NotificationMessage[];
 }
+
+/**
+ * Tower admin dashboard stat cards — GET /api/v1/towers/{tower_id}/dashboard-stats, per
+ * specs/00-architecture-and-standards.md §3.2 ("BentoGrid ... stat cards", "NumberTicker ...
+ * total collected this month, pending dues count, overdue amount"). Amounts are strings on
+ * the wire (backend Decimal fields serialize as JSON strings) — coerce with Number() before
+ * arithmetic, never raw `+` (see the expenditures-client.tsx NaN fix for why).
+ */
+export interface TowerDashboardStats {
+  total_flats: number;
+  occupied_flats: number;
+  vacant_flats: number;
+  total_collected_this_month: number;
+  pending_dues_count: number;
+  overdue_dues_count: number;
+  overdue_amount: number;
+  open_special_collections_count: number;
+  expenditure_this_month: number;
+}
+
+/** GET /api/v1/towers/{tower_id}/audit-log — specs/01-auth-rbac-tower-setup/backend.md.
+ * Powers the dashboard's recent-activity AnimatedList feed. */
+export interface AuditLogEntry {
+  id: string;
+  tower_id: string | null;
+  user_id: string | null;
+  actor_label: string;
+  action: string;
+  entity_type: string;
+  entity_id: string;
+  before: Record<string, unknown> | null;
+  after: Record<string, unknown> | null;
+  created_at: string;
+}

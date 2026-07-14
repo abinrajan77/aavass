@@ -6,6 +6,7 @@ from app.api.v1 import (
     auth,
     billing_cycles,
     complexes,
+    dashboard,
     expenditures,
     flats,
     grace_period,
@@ -44,3 +45,4 @@ api_v1_router.include_router(expenditures.router)
 api_v1_router.include_router(reports.router)
 api_v1_router.include_router(owner_portal.router)
 api_v1_router.include_router(notifications.router)
+api_v1_router.include_router(dashboard.router)

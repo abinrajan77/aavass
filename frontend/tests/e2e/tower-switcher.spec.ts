@@ -12,7 +12,8 @@ test("tower switcher (Ctrl+K) moves context from Tower A to Tower B with no stal
   await seedSessionCookie(page, ADMIN_SESSION);
 
   await page.goto(`/towers/${TOWER_A.tower_id}`);
-  await expect(page.getByText(`Tower ID: ${TOWER_A.tower_id}`)).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
+  await expect(page.getByText(TOWER_A.tower_name, { exact: true })).toBeVisible();
 
   await page.keyboard.press("Control+k");
   const dialog = page.getByRole("dialog");
@@ -20,8 +21,8 @@ test("tower switcher (Ctrl+K) moves context from Tower A to Tower B with no stal
   await dialog.getByText(TOWER_B.tower_name).click();
 
   await expect(page).toHaveURL(new RegExp(`/towers/${TOWER_B.tower_id}$`));
-  // The dashboard placeholder re-renders with the new tower id — asserting
-  // the old tower's id string is gone confirms no stale Tower-A content.
-  await expect(page.getByText(`Tower ID: ${TOWER_B.tower_id}`)).toBeVisible();
-  await expect(page.getByText(`Tower ID: ${TOWER_A.tower_id}`)).toHaveCount(0);
+  // The breadcrumb re-renders with the new tower's name — asserting the old
+  // tower's name is gone confirms no stale Tower-A content.
+  await expect(page.getByText(TOWER_B.tower_name, { exact: true })).toBeVisible();
+  await expect(page.getByText(TOWER_A.tower_name, { exact: true })).toHaveCount(0);
 });

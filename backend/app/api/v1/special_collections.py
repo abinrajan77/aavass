@@ -18,14 +18,19 @@ from app.models.special_collection import SpecialCollection
 from app.models.special_collection_due import SpecialCollectionDue
 from app.models.user import User
 from app.schemas.common import PageEnvelope
+from app.schemas.payment import MarkPaidRequest
+from app.schemas.receipt import ReceiptOut
 from app.schemas.special_collection import (
     SpecialCollectionCreate,
     SpecialCollectionDueOut,
+    SpecialCollectionMarkPaidResponse,
     SpecialCollectionOut,
     SplitBasis,
 )
+from app.services import storage
 from app.services.audit import write_audit_log
 from app.services.flat_directory import FlatDirectory, get_flat_directory
+from app.services.payments import record_payment
 from app.services.special_collection import generate_dues, rollups_for_collections
 
 router = APIRouter(prefix="/towers/{tower_id}/special-collections", tags=["special-collections"])
@@ -303,3 +308,64 @@ async def get_special_collection_due(
     if due is None:
         raise AppError(404, "SPECIAL_COLLECTION_DUE_NOT_FOUND", "Due not found.")
     return SpecialCollectionDueOut.model_validate(due)
+
+
+@router.patch(
+    "/{special_collection_id}/dues/{due_id}/mark-paid",
+    response_model=SpecialCollectionMarkPaidResponse,
+)
+async def mark_special_collection_due_paid(
+    tower_id: UUID,
+    special_collection_id: UUID,
+    due_id: UUID,
+    payload: MarkPaidRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    member: AssociationMember | None = Depends(require_permission("RECORD_PAYMENT")),
+) -> SpecialCollectionMarkPaidResponse:
+    """backend.md: 'Delegates to Module 3's record_payment(due_type="special_collection", ...)'
+    — this handler is the HTTP boundary + its own scoping check only; all status-transition,
+    receipt-generation, and audit-log logic lives in `record_payment` itself."""
+    if member is None:
+        raise AppError(
+            422,
+            "ASSOCIATION_MEMBERSHIP_REQUIRED",
+            "This action requires an association-member identity.",
+        )
+
+    due = await db.scalar(
+        select(SpecialCollectionDue).where(
+            SpecialCollectionDue.id == due_id,
+            SpecialCollectionDue.special_collection_id == special_collection_id,
+            SpecialCollectionDue.tower_id == tower_id,
+        )
+    )
+    if due is None:
+        raise AppError(404, "SPECIAL_COLLECTION_DUE_NOT_FOUND", "Due not found.")
+
+    receipt = await record_payment(
+        db,
+        tower_id=tower_id,
+        due_type="special_collection",
+        due_id=due_id,
+        payment_date=payload.payment_date,
+        amount_received=payload.amount_received,
+        payment_mode=payload.payment_mode,
+        reference_number=payload.reference_number,
+        recorded_by=member,
+    )
+
+    await db.refresh(due)
+    download_url = await storage.presigned_get_url(key=receipt.pdf_s3_key)
+
+    return SpecialCollectionMarkPaidResponse(
+        due=SpecialCollectionDueOut.model_validate(due),
+        receipt=ReceiptOut(
+            id=receipt.id,
+            receipt_number=receipt.receipt_number,
+            owner_name_snapshot=receipt.owner_name_snapshot,
+            billing_period_label=receipt.billing_period_label,
+            generated_at=receipt.generated_at,
+            download_url=download_url,
+        ),
+    )
