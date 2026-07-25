@@ -43,7 +43,7 @@ export function TenantsTab({
     );
   }
 
-  const tenants = tenantsQuery.data ?? [];
+  const tenants = tenantsQuery.data?.items ?? [];
   const activeTenant = tenants.find((t) => t.is_active) ?? null;
   const history = tenants.filter((t) => !t.is_active);
 

@@ -51,7 +51,7 @@ export function MyFlatClient({ flatId }: { flatId: string }) {
     );
   }
 
-  const flat = myFlatsQuery.data?.find((f) => f.id === flatId);
+  const flat = myFlatsQuery.data?.items.find((f) => f.id === flatId);
 
   if (!flat) {
     return (
@@ -79,10 +79,10 @@ function FlatOwnerView({
   const ownersQuery = useFlatOwnersQuery(towerId, flatId);
   const updateContactMutation = useUpdateOwnerContactMutation(towerId, flatId);
 
-  const flat = myFlatsQuery.data?.find((f) => f.id === flatId);
+  const flat = myFlatsQuery.data?.items.find((f) => f.id === flatId);
   // Owner.user_id links the Owner row to the logged-in User — see
   // lib/api/types.ts's `Owner.user_id` comment for why this match is needed.
-  const myOwnership = ownersQuery.data?.find(
+  const myOwnership = ownersQuery.data?.items.find(
     (o) => !o.date_to && o.owner.user_id && o.owner.user_id === sessionUserId
   );
 

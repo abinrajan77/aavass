@@ -55,7 +55,9 @@ export function reactivateFlat(towerId: string, flatId: string) {
 // --- Owners (nested under a flat) -----------------------------------------
 
 export function listFlatOwners(towerId: string, flatId: string) {
-  return api.get<FlatOwnership[]>(`/api/v1/towers/${towerId}/flats/${flatId}/owners`);
+  return api.get<Paginated<FlatOwnership>>(`/api/v1/towers/${towerId}/flats/${flatId}/owners`, {
+    params: { page_size: 100 },
+  });
 }
 
 /**
@@ -118,7 +120,9 @@ export function removeFlatOwnership(
 // --- Tenants (nested under a flat) -----------------------------------------
 
 export function listFlatTenants(towerId: string, flatId: string) {
-  return api.get<Tenant[]>(`/api/v1/towers/${towerId}/flats/${flatId}/tenants`);
+  return api.get<Paginated<Tenant>>(`/api/v1/towers/${towerId}/flats/${flatId}/tenants`, {
+    params: { page_size: 100 },
+  });
 }
 
 export interface TenantCreateInput {
@@ -166,13 +170,14 @@ export function vacateFlatTenant(
 // --- Owner self-service -----------------------------------------------------
 
 /**
- * GET /api/v1/me/flats — cross-tower list of flats the caller currently owns
- * (backend.md). Modeled as a plain array (not the offset-pagination
- * envelope) since it's a personal "my flats" list, not a tower-wide list —
- * backend.md doesn't show a paginated envelope for this specific route.
+ * GET /api/v1/me/flats — cross-tower list of flats the caller currently owns.
+ * Returns the same offset-pagination envelope as every other list route
+ * (`app/api/v1/me_flats.py`'s `PageEnvelope[FlatOut]`); page_size bumped to
+ * 100 since this is expected to be a short personal list, not something a
+ * caller should ever need to paginate through.
  */
 export function getMyFlats() {
-  return api.get<Flat[]>("/api/v1/me/flats");
+  return api.get<Paginated<Flat>>("/api/v1/me/flats", { params: { page_size: 100 } });
 }
 
 export interface ActiveFlatCount {

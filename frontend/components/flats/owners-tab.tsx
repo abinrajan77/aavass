@@ -57,7 +57,7 @@ export function OwnersTab({
     );
   }
 
-  const ownerships = ownersQuery.data ?? [];
+  const ownerships = ownersQuery.data?.items ?? [];
   const active = ownerships.filter((o) => !o.date_to);
   const history = ownerships.filter((o) => o.date_to);
   const otherActiveOwners = (excludeId: string) => active.filter((o) => o.id !== excludeId);
