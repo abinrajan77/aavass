@@ -1,16 +1,19 @@
-"""Tower business logic: code derivation, Admin-role seeding, and the (stubbed)
-active-financials check used by tower deactivation."""
+"""Tower business logic: code derivation, Admin-role seeding, and the active-financials check
+used by tower deactivation."""
 
 import re
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import exists, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.permissions import ADMIN_ROLE_NAME, PERMISSION_CATALOG
+from app.models.maintenance_due import MaintenanceDue
 from app.models.permission import Permission
 from app.models.role import Role
 from app.models.role_permission import RolePermission
+from app.models.special_collection import SpecialCollection
+from app.models.special_collection_due import SpecialCollectionDue
 from app.models.tower import Tower
 
 
@@ -44,17 +47,31 @@ async def seed_admin_role(db: AsyncSession, *, tower_id: UUID) -> Role:
 
 
 async def tower_has_active_financials(db: AsyncSession, *, tower_id: UUID) -> bool:
-    """Whether the tower has any Pending/Overdue maintenance or special-collection due.
+    """Whether the tower has any Pending/Overdue maintenance or special-collection due (per
+    overview.md's edge case: "Deactivating a tower with active flats/dues is blocked with 409
+    TOWER_HAS_ACTIVE_FINANCIALS if any Pending/Overdue ... due exists"). Special-collection
+    dues belonging to a cancelled (`deactivated_at IS NOT NULL`) collection don't count — a
+    cancelled collection's leftover `pending` rows are no longer money actually owed."""
+    has_maintenance_due = await db.scalar(
+        select(
+            exists().where(
+                MaintenanceDue.tower_id == tower_id,
+                MaintenanceDue.status.in_(("pending", "overdue")),
+            )
+        )
+    )
+    if has_maintenance_due:
+        return True
 
-    TODO(module-3/4): Modules 3 (Maintenance Billing) and 4 (Special Collections &
-    Expenditure) own the `maintenance_dues` / `special_collection_dues` tables that this
-    check needs to query (per overview.md's edge case: "Deactivating a tower with active
-    flats/dues is blocked with 409 TOWER_HAS_ACTIVE_FINANCIALS if any Pending/Overdue ...
-    due exists"). Those tables don't exist yet in this codebase, so this stub always
-    reports "no active financials found" (i.e. deactivation is never blocked by this
-    specific check). Replace this function body with a real query against
-    `maintenance_dues`/`special_collection_dues` (status IN ('Pending', 'Overdue') AND
-    tower_id = :tower_id) once Module 3/4 land — do not fake the whole feature by
-    hardcoding a block, only the missing data dependency is stubbed.
-    """
-    return False
+    has_special_collection_due = await db.scalar(
+        select(
+            exists().where(
+                SpecialCollectionDue.tower_id == tower_id,
+                SpecialCollectionDue.status.in_(("pending", "overdue")),
+                SpecialCollectionDue.special_collection_id.in_(
+                    select(SpecialCollection.id).where(SpecialCollection.deactivated_at.is_(None))
+                ),
+            )
+        )
+    )
+    return bool(has_special_collection_due)

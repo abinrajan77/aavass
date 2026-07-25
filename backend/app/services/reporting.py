@@ -41,6 +41,7 @@ from app.schemas.report import (
     TenantRegisterResponse,
     TenantRegisterRow,
 )
+from app.services.billing_formula import get_current_grace_period
 
 MONTH_NAMES = [
     "",
@@ -276,12 +277,18 @@ async def build_outstanding_dues_report(
             )
         )
     ).scalars().all()
+    # Special-collection dues have no per-due grace-period snapshot (no billing cycle to
+    # snapshot it from) — the overdue-transition job (app.services.overdue) applies the
+    # tower's *current* GracePeriodConfig, so this report uses the same lookup for a
+    # consistent `days_overdue`/`grace_period_days` figure.
+    special_grace_period_days = 0
+    if special_rows:
+        config = await get_current_grace_period(db, tower_id, as_of_date)
+        special_grace_period_days = config.grace_period_days if config else 0
     for due in special_rows:
-        # No grace-period concept exists for special-collection dues (see
-        # `app/models/special_collection_due.py` — no such column, and Module 4 never models
-        # one): `grace_period_days=0`, so `days_overdue` is simply `as_of_date - due_date`,
-        # floored at 0. Documented decision, not an oversight — see this build's report.
-        days_overdue = max(0, (as_of_date - due.due_date).days)
+        days_overdue = max(
+            0, (as_of_date - (due.due_date + timedelta(days=special_grace_period_days))).days
+        )
         items.append(
             OutstandingDueRow(
                 flat_number=due.flat_number,
@@ -290,7 +297,7 @@ async def build_outstanding_dues_report(
                 resident_name=due.owner_name,
                 amount_due=due.amount,
                 due_date=due.due_date,
-                grace_period_days=0,
+                grace_period_days=special_grace_period_days,
                 days_overdue=days_overdue,
             )
         )

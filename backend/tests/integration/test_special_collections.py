@@ -1,12 +1,15 @@
 """Integration tests for the special-collections slice — backend.md test plan items 1-5, plus
 mark-paid (item 6, see `test_mark_special_collection_due_paid_*` below).
 
-Module 2 (Flat/Owner/Tenant) doesn't exist in this codebase yet, so every test here
-overrides `app.services.flat_directory.get_flat_directory` with a `FakeFlatDirectory`
-seeded via `make_active_flat_record` (see `tests/factories.py`) — the same
-`app.dependency_overrides` pattern `tests/conftest.py` already uses for `get_db`. This
-exercises the real HTTP endpoint, the real equal-split algorithm, and real DB writes; only
-the Module-2 data source is swapped.
+Most tests here override `app.services.flat_directory.get_flat_directory` with a
+`FakeFlatDirectory` seeded via `make_active_flat_record_row` (see `tests/factories.py`) — the
+same `app.dependency_overrides` pattern `tests/conftest.py` already uses for `get_db`. This is
+a speed/isolation choice, not a Module-2-doesn't-exist workaround (Module 2 has since landed;
+`make_active_flat_record_row` creates real `Flat`/`Owner` rows so `special_collection_dues`'s
+real FKs are satisfied) — it exercises the real HTTP endpoint, the real equal-split algorithm,
+and real DB writes, without wiring up full `FlatOwnership` history for every fixture flat. The
+async-generation tests below use real flats/ownerships via `RealFlatDirectory` instead, since
+they need `flats_service.count_active` to see real rows anyway.
 
 Mark-paid delegates to Module 3's shared `record_payment(due_type="special_collection", ...)`
 — `app/services/special_collection.py` registers the due/label/owner-name resolvers that
@@ -20,14 +23,21 @@ import pytest
 from sqlalchemy import select
 
 from app.main import app
+from app.models.job import Job
+from app.models.special_collection import SpecialCollection
 from app.models.special_collection_due import SpecialCollectionDue
+from app.services import special_collection as special_collection_module
 from app.services.flat_directory import get_flat_directory
+from app.services.special_collection import process_special_collection_job
 from tests.factories import (
     DEFAULT_PASSWORD,
     FakeFlatDirectory,
-    make_active_flat_record,
+    make_active_flat_record_row,
     make_association_member,
     make_complex,
+    make_flat,
+    make_owner,
+    make_primary_owner_for_flat,
     make_role,
     make_tower,
     make_user,
@@ -61,10 +71,11 @@ async def test_due_generation_targets_owner_not_tenant(client, db_session):
     tower, user = await _setup_tower_with_admin(
         db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
     )
-    owner_id = uuid4()
+    owner = await make_owner(db_session, full_name="Jane Owner")
+    owner_id = owner.id
     tenant_id = uuid4()  # never referenced anywhere in the fixture's flat record
-    flat_record = make_active_flat_record(
-        flat_number="101", owner_id=owner_id, owner_name="Jane Owner"
+    flat_record = await make_active_flat_record_row(
+        db_session, tower_id=tower.id, flat_number="101", owner_id=owner_id, owner_name="Jane Owner"
     )
     _override_flat_directory(FakeFlatDirectory({tower.id: [flat_record]}))
     try:
@@ -99,7 +110,10 @@ async def test_equal_split_calculation_with_correct_rounding(client, db_session)
     tower, user = await _setup_tower_with_admin(
         db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
     )
-    flats = [make_active_flat_record(flat_number=str(100 + i)) for i in range(7)]
+    flats = [
+        await make_active_flat_record_row(db_session, tower_id=tower.id, flat_number=str(100 + i))
+        for i in range(7)
+    ]
     _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
     try:
         await _login(client, user.email)
@@ -142,8 +156,15 @@ async def test_flat_with_no_active_owner_is_skipped_not_fatal(client, db_session
     tower, user = await _setup_tower_with_admin(
         db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
     )
-    flats = [make_active_flat_record(flat_number=str(100 + i)) for i in range(9)]
-    flats.append(make_active_flat_record(flat_number="110", no_active_owner=True))
+    flats = [
+        await make_active_flat_record_row(db_session, tower_id=tower.id, flat_number=str(100 + i))
+        for i in range(9)
+    ]
+    flats.append(
+        await make_active_flat_record_row(
+            db_session, tower_id=tower.id, flat_number="110", no_active_owner=True
+        )
+    )
     _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
     try:
         await _login(client, user.email)
@@ -176,7 +197,10 @@ async def test_multiple_simultaneous_open_special_collections(client, db_session
     tower, user = await _setup_tower_with_admin(
         db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
     )
-    flats = [make_active_flat_record(flat_number=str(100 + i)) for i in range(3)]
+    flats = [
+        await make_active_flat_record_row(db_session, tower_id=tower.id, flat_number=str(100 + i))
+        for i in range(3)
+    ]
     _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
     try:
         await _login(client, user.email)
@@ -238,7 +262,7 @@ async def test_special_collection_cannot_cancel_once_a_due_is_paid(client, db_se
     tower, user = await _setup_tower_with_admin(
         db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
     )
-    flats = [make_active_flat_record(flat_number="101")]
+    flats = [await make_active_flat_record_row(db_session, tower_id=tower.id, flat_number="101")]
     _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
     try:
         await _login(client, user.email)
@@ -274,7 +298,7 @@ async def test_special_collection_can_cancel_when_no_dues_paid(client, db_sessio
     tower, user = await _setup_tower_with_admin(
         db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
     )
-    flats = [make_active_flat_record(flat_number="101")]
+    flats = [await make_active_flat_record_row(db_session, tower_id=tower.id, flat_number="101")]
     _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
     try:
         await _login(client, user.email)
@@ -301,7 +325,11 @@ async def test_mark_special_collection_due_paid_creates_receipt_and_flips_status
         db_session,
         permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA", "RECORD_PAYMENT"],
     )
-    flats = [make_active_flat_record(flat_number="101", owner_name="Asha Rao")]
+    flats = [
+        await make_active_flat_record_row(
+            db_session, tower_id=tower.id, flat_number="101", owner_name="Asha Rao"
+        )
+    ]
     _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
     try:
         await _login(client, user.email)
@@ -318,7 +346,7 @@ async def test_mark_special_collection_due_paid_creates_receipt_and_flips_status
             await client.get(f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues")
         ).json()["items"][0]["id"]
 
-        resp = await client.patch(
+        resp = await client.post(
             f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues/{due_id}/mark-paid",
             json={
                 "payment_date": "2026-09-05",
@@ -339,7 +367,7 @@ async def test_mark_special_collection_due_paid_creates_receipt_and_flips_status
         assert body["receipt"]["download_url"]
 
         # A second mark-paid on the same due must not double-pay.
-        second = await client.patch(
+        second = await client.post(
             f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues/{due_id}/mark-paid",
             json={
                 "payment_date": "2026-09-06",
@@ -352,3 +380,180 @@ async def test_mark_special_collection_due_paid_creates_receipt_and_flips_status
         assert second.json()["error_code"] == "DUE_ALREADY_PAID"
     finally:
         _clear_flat_directory_override()
+
+
+@pytest.mark.asyncio
+async def test_get_receipt_after_mark_paid(client, db_session):
+    tower, user = await _setup_tower_with_admin(
+        db_session,
+        permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA", "RECORD_PAYMENT"],
+    )
+    flats = [
+        await make_active_flat_record_row(
+            db_session, tower_id=tower.id, flat_number="101", owner_name="Asha Rao"
+        )
+    ]
+    _override_flat_directory(FakeFlatDirectory({tower.id: flats}))
+    try:
+        await _login(client, user.email)
+        create_resp = await client.post(
+            f"/api/v1/towers/{tower.id}/special-collections",
+            json={
+                "title": "Lift Modernization Fund",
+                "total_amount": "1000.00",
+                "due_date": "2026-09-01",
+            },
+        )
+        collection_id = create_resp.json()["id"]
+        due_id = (
+            await client.get(f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues")
+        ).json()["items"][0]["id"]
+
+        before_paid = await client.get(
+            f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues/{due_id}/receipt"
+        )
+        assert before_paid.status_code == 404
+        assert before_paid.json()["error_code"] == "RECEIPT_NOT_AVAILABLE"
+
+        await client.post(
+            f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues/{due_id}/mark-paid",
+            json={
+                "payment_date": "2026-09-05",
+                "amount_received": "1000.00",
+                "payment_mode": "cash",
+                "reference_number": None,
+            },
+        )
+
+        resp = await client.get(
+            f"/api/v1/towers/{tower.id}/special-collections/{collection_id}/dues/{due_id}/receipt"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["receipt_number"]
+        assert body["download_url"]
+    finally:
+        _clear_flat_directory_override()
+
+
+@pytest.mark.asyncio
+async def test_async_generation_returns_202_and_worker_completes_the_job(
+    client, db_session, monkeypatch
+):
+    """overview.md's async due-generation path (backend.md: ">300 active flats enqueues
+    special-collection-jobs and returns 202") — threshold monkeypatched down to keep this
+    fast, mirroring `test_billing_cycle_generation.py`'s identical pattern for Module 3."""
+    monkeypatch.setattr(special_collection_module, "SYNC_DUE_GENERATION_FLAT_THRESHOLD", 2)
+    import app.api.v1.special_collections as special_collections_router
+
+    monkeypatch.setattr(special_collections_router, "SYNC_DUE_GENERATION_FLAT_THRESHOLD", 2)
+
+    tower, user = await _setup_tower_with_admin(
+        db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
+    )
+    for i in range(3):
+        flat = await make_flat(db_session, tower_id=tower.id, flat_number=str(300 + i))
+        await make_primary_owner_for_flat(
+            db_session, flat_id=flat.id, created_by_user_id=user.id, full_name=f"Owner {i}"
+        )
+    await db_session.commit()
+    await _login(client, user.email)
+
+    resp = await client.post(
+        f"/api/v1/towers/{tower.id}/special-collections",
+        json={"title": "Facade Repaint", "total_amount": "900.00", "due_date": "2026-09-01"},
+    )
+    assert resp.status_code == 202
+    body = resp.json()
+    assert body["status"] == "generating"
+    job_id = body["job_id"]
+    collection_id = body["special_collection_id"]
+
+    # No dues yet — generation hasn't run.
+    collection = await db_session.get(SpecialCollection, collection_id)
+    assert collection.dues_generated_at is None
+
+    job = await db_session.get(Job, job_id)
+    await process_special_collection_job(db_session, job=job)
+
+    await db_session.refresh(collection)
+    assert collection.dues_generated_at is not None
+
+    poll_resp = await client.get(f"/api/v1/towers/{tower.id}/jobs/{job_id}")
+    assert poll_resp.status_code == 200
+    assert poll_resp.json()["status"] == "done"
+    assert poll_resp.json()["result"]["dues_created"] == 3
+
+    dues = (
+        (
+            await db_session.execute(
+                select(SpecialCollectionDue).where(
+                    SpecialCollectionDue.special_collection_id == collection_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(dues) == 3
+
+
+@pytest.mark.asyncio
+async def test_retried_special_collection_job_delivery_is_a_safe_noop(
+    client, db_session, monkeypatch
+):
+    monkeypatch.setattr(special_collection_module, "SYNC_DUE_GENERATION_FLAT_THRESHOLD", 0)
+    import app.api.v1.special_collections as special_collections_router
+
+    monkeypatch.setattr(special_collections_router, "SYNC_DUE_GENERATION_FLAT_THRESHOLD", 0)
+
+    tower, user = await _setup_tower_with_admin(
+        db_session, permission_codes=["MANAGE_SPECIAL_COLLECTIONS", "VIEW_TOWER_DATA"]
+    )
+    flat = await make_flat(db_session, tower_id=tower.id)
+    await make_primary_owner_for_flat(db_session, flat_id=flat.id, created_by_user_id=user.id)
+    await db_session.commit()
+    await _login(client, user.email)
+
+    resp = await client.post(
+        f"/api/v1/towers/{tower.id}/special-collections",
+        json={"title": "Lobby Repaint", "total_amount": "500.00", "due_date": "2026-09-01"},
+    )
+    assert resp.status_code == 202
+    job_id = resp.json()["job_id"]
+    collection_id = resp.json()["special_collection_id"]
+
+    job = await db_session.get(Job, job_id)
+    await process_special_collection_job(db_session, job=job)
+
+    dues_after_first_run = (
+        (
+            await db_session.execute(
+                select(SpecialCollectionDue).where(
+                    SpecialCollectionDue.special_collection_id == collection_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(dues_after_first_run) == 1
+
+    # Simulate a duplicate SQS delivery of the same message.
+    job = await db_session.get(Job, job_id)
+    job.status = "pending"
+    await db_session.flush()
+    await process_special_collection_job(db_session, job=job)
+
+    dues_after_retry = (
+        (
+            await db_session.execute(
+                select(SpecialCollectionDue).where(
+                    SpecialCollectionDue.special_collection_id == collection_id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(dues_after_retry) == 1

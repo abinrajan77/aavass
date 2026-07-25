@@ -444,11 +444,17 @@ def make_active_flat_record(
     flat_id: UUID | None = None,
     no_active_owner: bool = False,
 ) -> ActiveFlatRecord:
-    """Builds one `ActiveFlatRecord` for `FakeFlatDirectory` fixtures.
+    """Builds one `ActiveFlatRecord` for `FakeFlatDirectory` fixtures — pure, no DB, no I/O
+    (used directly by `tests/unit/test_special_collection_split.py`'s algorithm-level tests
+    against `compute_equal_split`, which must stay DB-free per that module's own docstring).
 
     By default mints a fresh `owner_id` (and uses `owner_name`) so most callers don't have to
     think about it. Pass `no_active_owner=True` (or `owner_id=None`) to simulate a flat with
     no active owner — backend.md test plan item 3's `NO_ACTIVE_OWNER` skip path.
+
+    Integration tests that exercise `POST .../special-collections` end to end need real
+    `flat_id`/`owner_id`s (`special_collection_dues` carries real FKs to `flats`/`owners`, see
+    `043cebe147d4`) — those use `make_active_flat_record_row` below instead.
     """
     if no_active_owner or owner_id is None:
         return ActiveFlatRecord(
@@ -457,6 +463,38 @@ def make_active_flat_record(
     resolved_owner_id = owner_id if owner_id is not _UNSET else uuid4()
     return ActiveFlatRecord(
         flat_id=flat_id or uuid4(),
+        flat_number=flat_number,
+        owner_id=resolved_owner_id,
+        owner_name=owner_name,
+    )
+
+
+async def make_active_flat_record_row(
+    db: AsyncSession,
+    *,
+    tower_id: UUID,
+    flat_number: str,
+    owner_id: UUID | None = _UNSET,  # type: ignore[assignment]
+    owner_name: str = "Test Owner",
+    no_active_owner: bool = False,
+) -> ActiveFlatRecord:
+    """Same shape as `make_active_flat_record`, but backed by a real `Flat` row (and, unless
+    `no_active_owner`, a real `Owner` row) — for integration tests that generate real
+    `special_collection_dues` rows through the HTTP API, where the FK to `flats`/`owners` must
+    resolve. Pass an existing `owner_id` to reuse an already-created `Owner`."""
+    flat = await make_flat(db, tower_id=tower_id, flat_number=flat_number)
+
+    if no_active_owner or owner_id is None:
+        return ActiveFlatRecord(
+            flat_id=flat.id, flat_number=flat_number, owner_id=None, owner_name=None
+        )
+    if owner_id is not _UNSET:
+        resolved_owner_id = owner_id
+    else:
+        owner = await make_owner(db, full_name=owner_name)
+        resolved_owner_id = owner.id
+    return ActiveFlatRecord(
+        flat_id=flat.id,
         flat_number=flat_number,
         owner_id=resolved_owner_id,
         owner_name=owner_name,

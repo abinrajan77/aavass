@@ -2,6 +2,7 @@ from datetime import UTC, datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -14,12 +15,13 @@ from app.core.errors import AppError
 from app.core.pagination import Pagination, pagination_params
 from app.db.session import get_db
 from app.models.association_member import AssociationMember
+from app.models.receipt import Receipt
 from app.models.special_collection import SpecialCollection
 from app.models.special_collection_due import SpecialCollectionDue
 from app.models.user import User
 from app.schemas.common import PageEnvelope
 from app.schemas.payment import MarkPaidRequest
-from app.schemas.receipt import ReceiptOut
+from app.schemas.receipt import ReceiptDownloadOut, ReceiptOut
 from app.schemas.special_collection import (
     SpecialCollectionCreate,
     SpecialCollectionDueOut,
@@ -27,11 +29,16 @@ from app.schemas.special_collection import (
     SpecialCollectionOut,
     SplitBasis,
 )
-from app.services import storage
+from app.services import flats_service, sqs, storage
+from app.services import jobs as jobs_service
 from app.services.audit import write_audit_log
 from app.services.flat_directory import FlatDirectory, get_flat_directory
 from app.services.payments import record_payment
-from app.services.special_collection import generate_dues, rollups_for_collections
+from app.services.special_collection import (
+    SYNC_DUE_GENERATION_FLAT_THRESHOLD,
+    generate_dues,
+    rollups_for_collections,
+)
 
 router = APIRouter(prefix="/towers/{tower_id}/special-collections", tags=["special-collections"])
 
@@ -53,6 +60,7 @@ def _to_out(collection: SpecialCollection, rollup: dict) -> SpecialCollectionOut
         paid_count=rollup["paid_count"],
         overdue_count=rollup["overdue_count"],
         created_at=collection.created_at,
+        deactivated_at=collection.deactivated_at,
     )
 
 
@@ -66,7 +74,7 @@ async def create_special_collection(
         require_permission_with_member_id("MANAGE_SPECIAL_COLLECTIONS")
     ),
     flat_directory: FlatDirectory = Depends(get_flat_directory),
-) -> SpecialCollectionOut:
+) -> SpecialCollectionOut | JSONResponse:
     collection = SpecialCollection(
         tower_id=tower_id,
         title=payload.title,
@@ -79,11 +87,48 @@ async def create_special_collection(
     db.add(collection)
     await db.flush()
 
-    # backend.md: >300 active flats should enqueue an SQS job (`special-collection-jobs`)
-    # and return 202 instead. Not implemented in this slice (see
-    # app/services/special_collection.py's module docstring) — always synchronous here.
-    flats = await flat_directory.list_active_flats(tower_id=tower_id)
-    await generate_dues(db, special_collection=collection, flats=flats)
+    audit_after = {
+        "title": collection.title,
+        "total_amount": str(collection.total_amount),
+        "due_date": collection.due_date.isoformat(),
+    }
+
+    active_flat_count = await flats_service.count_active(db, tower_id)
+
+    if active_flat_count <= SYNC_DUE_GENERATION_FLAT_THRESHOLD:
+        flats = await flat_directory.list_active_flats(tower_id=tower_id)
+        await generate_dues(db, special_collection=collection, flats=flats)
+
+        await write_audit_log(
+            db,
+            actor=current_user,
+            tower_id=tower_id,
+            action="SPECIAL_COLLECTION_CREATED",
+            entity_type="SpecialCollection",
+            entity_id=collection.id,
+            before=None,
+            after=audit_after,
+        )
+        await db.commit()
+        await db.refresh(collection)
+
+        rollup = (await rollups_for_collections(db, collection_ids=[collection.id]))[
+            collection.id
+        ]
+        return _to_out(collection, rollup)
+
+    # backend.md: beyond SYNC_DUE_GENERATION_FLAT_THRESHOLD active flats, enqueue an SQS job
+    # (`special-collection-jobs`) and return 202 instead — mirrors billing_cycles.py's
+    # sync-vs-enqueue branch.
+    idempotency_key = f"{tower_id}:{collection.id}"
+    job = await jobs_service.create_job(
+        db,
+        tower_id=tower_id,
+        job_type="special_collection",
+        payload={"tower_id": str(tower_id), "special_collection_id": str(collection.id)},
+        idempotency_key=idempotency_key,
+    )
+    collection.job_id = job.id
 
     await write_audit_log(
         db,
@@ -93,17 +138,24 @@ async def create_special_collection(
         entity_type="SpecialCollection",
         entity_id=collection.id,
         before=None,
-        after={
-            "title": collection.title,
-            "total_amount": str(collection.total_amount),
-            "due_date": collection.due_date.isoformat(),
-        },
+        after=audit_after,
     )
     await db.commit()
-    await db.refresh(collection)
 
-    rollup = (await rollups_for_collections(db, collection_ids=[collection.id]))[collection.id]
-    return _to_out(collection, rollup)
+    await sqs.enqueue(
+        queue_name="special-collection-jobs",
+        payload={"tower_id": str(tower_id), "special_collection_id": str(collection.id)},
+        idempotency_key=idempotency_key,
+    )
+
+    return JSONResponse(
+        status_code=202,
+        content={
+            "special_collection_id": str(collection.id),
+            "job_id": str(job.id),
+            "status": "generating",
+        },
+    )
 
 
 @router.get("", response_model=PageEnvelope[SpecialCollectionOut])
@@ -310,7 +362,7 @@ async def get_special_collection_due(
     return SpecialCollectionDueOut.model_validate(due)
 
 
-@router.patch(
+@router.post(
     "/{special_collection_id}/dues/{due_id}/mark-paid",
     response_model=SpecialCollectionMarkPaidResponse,
 )
@@ -369,3 +421,37 @@ async def mark_special_collection_due_paid(
             download_url=download_url,
         ),
     )
+
+
+@router.get(
+    "/{special_collection_id}/dues/{due_id}/receipt", response_model=ReceiptDownloadOut
+)
+async def get_special_collection_due_receipt(
+    tower_id: UUID,
+    special_collection_id: UUID,
+    due_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    _member=Depends(require_permission("VIEW_TOWER_DATA")),
+) -> ReceiptDownloadOut:
+    """Mirrors Module 3's `GET .../dues/{due_id}/receipt` (`app/api/v1/maintenance_dues.py`) —
+    re-download a receipt already generated by mark-paid, without re-triggering payment."""
+    due = await db.scalar(
+        select(SpecialCollectionDue).where(
+            SpecialCollectionDue.id == due_id,
+            SpecialCollectionDue.special_collection_id == special_collection_id,
+            SpecialCollectionDue.tower_id == tower_id,
+        )
+    )
+    if due is None:
+        raise AppError(404, "SPECIAL_COLLECTION_DUE_NOT_FOUND", "Due not found.")
+    if due.status != "paid":
+        raise AppError(404, "RECEIPT_NOT_AVAILABLE", "This due has not been paid yet.")
+
+    receipt = await db.scalar(
+        select(Receipt).where(Receipt.due_type == "special_collection", Receipt.due_id == due_id)
+    )
+    if receipt is None:
+        raise AppError(404, "RECEIPT_NOT_AVAILABLE", "No receipt exists for this due.")
+
+    download_url = await storage.presigned_get_url(key=receipt.pdf_s3_key)
+    return ReceiptDownloadOut(receipt_number=receipt.receipt_number, download_url=download_url)

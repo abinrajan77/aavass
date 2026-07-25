@@ -46,6 +46,9 @@ class SpecialCollectionOut(BaseModel):
     paid_count: int
     overdue_count: int
     created_at: datetime
+    # Non-null once cancelled via `DELETE .../special-collections/{id}` — surfaced so a
+    # cancelled collection's leftover pending dues aren't mistaken for still-open ones.
+    deactivated_at: datetime | None = None
 
     model_config = {"from_attributes": True}
 

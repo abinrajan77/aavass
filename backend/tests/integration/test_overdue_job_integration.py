@@ -3,21 +3,25 @@ against a real DB so the `billing_cycles` join and `audit_log` write are real. S
 `test_billing_cycle_generation.py`'s module docstring re: sandbox runnability."""
 
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import select
 
 from app.models.audit_log import AuditLog
 from app.models.maintenance_due import MaintenanceDue
+from app.models.special_collection_due import SpecialCollectionDue
 from app.services.overdue import SYSTEM_ACTOR_LABEL, run_overdue_transition
 from tests.factories import (
     make_billing_admin,
     make_billing_cycle,
     make_complex,
     make_flat,
+    make_grace_period_config,
     make_maintenance_formula,
+    make_owner,
     make_primary_owner_for_flat,
+    make_special_collection,
     make_tower,
 )
 
@@ -191,3 +195,94 @@ async def test_marking_paid_after_overdue_flip_is_still_allowed(db_session):
     assert receipt is not None
     await db_session.refresh(due)
     assert due.status == "paid"
+
+
+@pytest.mark.asyncio
+async def test_flips_pending_special_collection_due_using_towers_current_grace_period(
+    db_session,
+):
+    """specs/04-special-collections-expenditure/backend.md: special-collection dues transition
+    via this same job, keyed off the tower's *current* `GracePeriodConfig` (no per-due
+    grace-period snapshot exists for this due type)."""
+    complex_row = await make_complex(db_session)
+    tower = await make_tower(db_session, complex_id=complex_row.id)
+    member = await make_billing_admin(
+        db_session, tower_id=tower.id, email="special-overdue@example.com"
+    )
+    await make_grace_period_config(
+        db_session,
+        tower_id=tower.id,
+        created_by=member.id,
+        grace_period_days=0,
+        effective_from=date(2026, 1, 1),
+    )
+    flat = await make_flat(db_session, tower_id=tower.id)
+    owner = await make_owner(db_session, full_name="Asha Rao")
+    collection = await make_special_collection(db_session, tower_id=tower.id, created_by=member.id)
+    due = SpecialCollectionDue(
+        special_collection_id=collection.id,
+        tower_id=tower.id,
+        flat_id=flat.id,
+        flat_number=flat.flat_number,
+        owner_id=owner.id,
+        owner_name=owner.full_name,
+        amount="500.00",
+        due_date=date(2026, 7, 10),
+        status="pending",
+    )
+    db_session.add(due)
+    await db_session.commit()
+
+    flipped = await run_overdue_transition(db_session, as_of=date(2026, 7, 11))
+
+    assert due.id in flipped
+    await db_session.refresh(due)
+    assert due.status == "overdue"
+
+    entry = await db_session.scalar(
+        select(AuditLog).where(
+            AuditLog.action == "due_overdue_transition", AuditLog.entity_id == due.id
+        )
+    )
+    assert entry is not None
+    assert entry.entity_type == "special_collection"
+    assert entry.actor_label == SYSTEM_ACTOR_LABEL
+
+
+@pytest.mark.asyncio
+async def test_cancelled_special_collections_dues_are_never_flipped_overdue(db_session):
+    complex_row = await make_complex(db_session)
+    tower = await make_tower(db_session, complex_id=complex_row.id)
+    member = await make_billing_admin(
+        db_session, tower_id=tower.id, email="cancelled-overdue@example.com"
+    )
+    await make_grace_period_config(
+        db_session,
+        tower_id=tower.id,
+        created_by=member.id,
+        grace_period_days=0,
+        effective_from=date(2026, 1, 1),
+    )
+    flat = await make_flat(db_session, tower_id=tower.id)
+    owner = await make_owner(db_session, full_name="Asha Rao")
+    collection = await make_special_collection(db_session, tower_id=tower.id, created_by=member.id)
+    collection.deactivated_at = datetime.now(UTC)
+    due = SpecialCollectionDue(
+        special_collection_id=collection.id,
+        tower_id=tower.id,
+        flat_id=flat.id,
+        flat_number=flat.flat_number,
+        owner_id=owner.id,
+        owner_name=owner.full_name,
+        amount="500.00",
+        due_date=date(2026, 7, 10),
+        status="pending",
+    )
+    db_session.add(due)
+    await db_session.commit()
+
+    flipped = await run_overdue_transition(db_session, as_of=date(2026, 7, 11))
+
+    assert due.id not in flipped
+    await db_session.refresh(due)
+    assert due.status == "pending"

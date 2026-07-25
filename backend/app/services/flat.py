@@ -1,16 +1,19 @@
 """Flat business logic: response assembly (primary owner / active tenant lookups) and the
-(stubbed) open-dues check used by flat deactivation.
+open-dues check used by flat deactivation.
 """
 
 from typing import cast
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.flat import Flat
 from app.models.flat_ownership import FlatOwnership
+from app.models.maintenance_due import MaintenanceDue
 from app.models.owner import Owner
+from app.models.special_collection import SpecialCollection
+from app.models.special_collection_due import SpecialCollectionDue
 from app.models.tenant import Tenant
 from app.schemas.flat import FlatOut, OccupancyStatus
 from app.schemas.owner import OwnerSummary
@@ -55,17 +58,35 @@ async def build_flat_out(db: AsyncSession, flat: Flat) -> FlatOut:
 
 
 async def flat_has_open_dues(db: AsyncSession, *, flat_id: UUID) -> tuple[bool, int]:
-    """Whether the flat has any Pending/Overdue maintenance or special-collection due.
-
-    TODO(module-3/4): Modules 3 (Maintenance Billing) and 4 (Special Collections &
-    Expenditure) own the `maintenance_dues` / `special_collection_dues` tables this check
-    needs to query (per `specs/02-flat-owner-tenant/overview.md` edge case: "Deactivating a
-    flat that has open dues" → `409 OPEN_DUES_EXIST` with the count). Those tables don't
-    exist yet in this codebase (mirrors the identical stub already shipped for towers in
-    `app/services/tower.py::tower_has_active_financials`), so this stub always reports "no
-    open dues found" (i.e. deactivation is never blocked by this specific check). Replace this
-    function body with a real query against `maintenance_dues`/`special_collection_dues`
-    (status IN ('pending', 'overdue') AND flat_id = :flat_id) once Module 3/4 land — do not
-    fake the whole feature by hardcoding a block, only the missing data dependency is stubbed.
-    """
-    return False, 0
+    """Whether the flat has any Pending/Overdue maintenance or special-collection due (per
+    `specs/02-flat-owner-tenant/overview.md` edge case: "Deactivating a flat that has open
+    dues" → `409 OPEN_DUES_EXIST` with the count). Mirrors
+    `app.services.tower.tower_has_active_financials`'s scope: special-collection dues
+    belonging to a cancelled collection don't count."""
+    maintenance_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(MaintenanceDue)
+            .where(
+                MaintenanceDue.flat_id == flat_id,
+                MaintenanceDue.status.in_(("pending", "overdue")),
+            )
+        )
+        or 0
+    )
+    special_collection_count = (
+        await db.scalar(
+            select(func.count())
+            .select_from(SpecialCollectionDue)
+            .where(
+                SpecialCollectionDue.flat_id == flat_id,
+                SpecialCollectionDue.status.in_(("pending", "overdue")),
+                SpecialCollectionDue.special_collection_id.in_(
+                    select(SpecialCollection.id).where(SpecialCollection.deactivated_at.is_(None))
+                ),
+            )
+        )
+        or 0
+    )
+    total = maintenance_count + special_collection_count
+    return total > 0, total

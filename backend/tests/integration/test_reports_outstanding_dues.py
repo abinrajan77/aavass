@@ -141,20 +141,22 @@ async def test_outstanding_dues_uses_grace_period_snapshot_not_current_config(cl
 
 @pytest.mark.asyncio
 async def test_outstanding_dues_includes_overdue_special_collection_due(client, db_session):
-    """Special-collection dues have no grace-period concept in Module 4's model — this build's
-    documented decision is `grace_period_days=0` for that source, so days_overdue is simply
-    `as_of_date - due_date`."""
+    """Special-collection dues have no per-due grace-period snapshot in Module 4's model — the
+    report falls back to the tower's *current* `GracePeriodConfig` (none seeded here), i.e.
+    `grace_period_days=0`, so days_overdue is simply `as_of_date - due_date`."""
     from app.models.special_collection_due import SpecialCollectionDue
-    from tests.factories import make_special_collection
+    from tests.factories import make_owner, make_special_collection
 
     tower, user, member = await _setup_reports_admin(db_session)
+    flat = await make_flat(db_session, tower_id=tower.id, flat_number="501")
+    owner = await make_owner(db_session, full_name="Farida Khan")
     collection = await make_special_collection(db_session, tower_id=tower.id, created_by=member.id)
     sc_due = SpecialCollectionDue(
         special_collection_id=collection.id,
         tower_id=tower.id,
-        flat_id=uuid4(),
+        flat_id=flat.id,
         flat_number="501",
-        owner_id=uuid4(),
+        owner_id=owner.id,
         owner_name="Farida Khan",
         amount=Decimal("5000.00"),
         due_date=date(2026, 6, 1),
